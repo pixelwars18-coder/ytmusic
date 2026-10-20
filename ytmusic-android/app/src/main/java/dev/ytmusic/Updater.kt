@@ -25,7 +25,7 @@ object Updater {
     class Info(val code: Int, val name: String, val apkUrl: String, val sha256: String, val notes: String)
 
     const val PORT = 8765
-    const val DEFAULT_URL = "http://192.168.1.233:$PORT/"
+    const val DEFAULT_URL = "https://github.com/pixelwars18-coder/ytmusic/releases/latest/download/"
 
     @Volatile var available: Info? = null
         private set
@@ -37,15 +37,15 @@ object Updater {
 
     private fun prefs() = App.instance.getSharedPreferences("updater", Context.MODE_PRIVATE)
     var baseUrl: String
-        get() = prefs().getString("url", DEFAULT_URL) ?: DEFAULT_URL
-        set(v) { prefs().edit().putString("url", normalize(v)).apply() }
+        get() = prefs().getString("base", DEFAULT_URL) ?: DEFAULT_URL   // (old "url" key held the home-PC address: ignored)
+        set(v) { prefs().edit().putString("base", normalize(v)).apply() }
 
     private fun normalize(u: String): String {
         var s = u.trim()
         if (s.isEmpty()) return DEFAULT_URL
         if (!s.startsWith("http://") && !s.startsWith("https://")) s = "http://$s"
         val hostPart = s.substringAfter("://").substringBefore("/")
-        if (!hostPart.contains(":")) s = s.replaceFirst(hostPart, "$hostPart:$PORT")   // bare address: use the default port
+        if (s.startsWith("http://") && !hostPart.contains(":")) s = s.replaceFirst(hostPart, "$hostPart:$PORT")   // bare address: use the default port
         return if (s.endsWith("/")) s else "$s/"
     }
 
@@ -80,7 +80,7 @@ object Updater {
             try {
                 var base = baseUrl
                 var o = fetchManifest(base)
-                if (o == null) {                       // saved address is stale: look around the network
+                if (o == null && base.startsWith("http://")) {   // a home-network server moved: look around the network
                     val d = discover()
                     android.util.Log.i("Updater", "saved server $base did not answer; scan found: $d")
                     if (d != null) { base = d; baseUrl = d; o = fetchManifest(d) }
@@ -97,7 +97,7 @@ object Updater {
                     msg = "You're up to date (v${currentName()})"
                 }
             } catch (e: Throwable) {
-                msg = if (e is java.io.IOException) "No update server found (is the PC on and on the same Wi-Fi?)" else "Update check failed: ${e.message}"
+                msg = if (e is java.io.IOException) "Couldn't reach the update server (check your internet connection)" else "Update check failed: ${e.message}"
                 if (manual) Crash.record("update check ${baseUrl}", e)
             }
             fire()
