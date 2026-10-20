@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Midnight (default) -->
+    <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/surface</item>
+        <item name="android:statusBarColor">@color/surface</item>
+        <item name="android:navigationBarColor">@color/surface_variant</item>
+        <item name="android:colorAccent">@color/primary</item>
+        <item name="android:textColorPrimary">@color/on_surface</item>
+        <item name="android:alertDialogTheme">@style/Dialog.Midnight</item>
+    </style>
+    <style name="AppTheme.Amoled" parent="AppTheme">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:statusBarColor">@android:color/black</item>
+        <item name="android:alertDialogTheme">@style/Dialog.Amoled</item>
+    </style>
+    <style name="AppTheme.Light" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#FBF8FF</item>
+        <item name="android:statusBarColor">#FBF8FF</item>
+        <item name="android:navigationBarColor">#F0EDF6</item>
+        <item name="android:colorAccent">#4355B9</item>
+        <item name="android:textColorPrimary">#1B1B21</item>
+        <item name="android:alertDialogTheme">@style/Dialog.Light</item>
+    </style>
+
+    <style name="Dialog.Midnight" parent="@android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorBackground">#1B1E26</item>
+        <item name="android:textColorPrimary">#E4E2E9</item>
+        <item name="android:textColorSecondary">#9DA0AE</item>
+        <item name="android:colorAccent">#B8C4FF</item>
+    </style>
+    <style name="Dialog.Amoled" parent="@android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorBackground">#0F1014</item>
+        <item name="android:textColorPrimary">#E4E2E9</item>
+        <item name="android:textColorSecondary">#9DA0AE</item>
+        <item name="android:colorAccent">#B8C4FF</item>
+    </style>
+    <style name="Dialog.Light" parent="@android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:colorBackground">#F0EDF6</item>
+        <item name="android:textColorPrimary">#1B1B21</item>
+        <item name="android:textColorSecondary">#5B5E6B</item>
+        <item name="android:colorAccent">#4355B9</item>
+    </style>
+</resources>

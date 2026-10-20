@@ -1,0 +1,9 @@
+[Unit]
+Description=YT Music update server (serves ~/ytmusic-updates on port 8765)
+
+[Service]
+ExecStart=%h/.local/bin/ytmusic-update-server
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

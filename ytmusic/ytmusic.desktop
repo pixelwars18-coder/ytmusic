@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=YT Music
+GenericName=Music Player
+Comment=Search and play music with yt-dlp and mpv
+Exec=/home/ahebert/.local/bin/ytmusic
+Icon=ytmusic
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;youtube;yt-dlp;mpv;
+StartupWMClass=ytmusic

@@ -1,0 +1,35 @@
+#!/bin/bash
+# Build a new YT Music for Fire APK and publish it to the update server folder.
+#   ytmusic-publish "what changed"        bump version, build, publish
+#   ytmusic-publish --same "note"          rebuild and republish without bumping the version
+set -euo pipefail
+SRC="$HOME/.local/src/ytmusic-android"
+OUT="$HOME/ytmusic-updates"
+export JAVA_HOME="$(ls -d "$HOME"/.local/jdk/jdk-21* | head -1)" ANDROID_HOME="$HOME/android-sdk"
+export PATH="$JAVA_HOME/bin:$HOME/.local/gradle-8.9/bin:$PATH"
+
+bump=1; [ "${1:-}" = "--same" ] && { bump=0; shift; }
+notes="${1:-}"
+code=$(grep -oP 'versionCode = \K\d+' "$SRC/app/build.gradle.kts")
+if [ "$bump" = 1 ]; then
+  code=$((code + 1))
+  sed -i -E "s/versionCode = [0-9]+/versionCode = $code/; s/versionName = \"[^\"]*\"/versionName = \"1.$((code - 1))\"/" "$SRC/app/build.gradle.kts"
+fi
+name="1.$((code - 1))"
+
+echo "Building v$name (versionCode $code)…"
+(cd "$SRC" && gradle --no-daemon -q :app:assembleRelease)
+apk="ytmusic-fire-$code.apk"
+mkdir -p "$OUT"
+cp "$SRC/app/build/outputs/apk/release/app-release.apk" "$OUT/$apk"
+sha=$(sha256sum "$OUT/$apk" | cut -d' ' -f1)
+python3 - "$OUT/version.json" "$code" "$name" "$apk" "$sha" "$notes" <<'PY'
+import json, sys
+path, code, name, apk, sha, notes = sys.argv[1:7]
+json.dump({"versionCode": int(code), "versionName": name, "apk": apk, "sha256": sha, "notes": notes}, open(path, "w"), indent=2)
+PY
+cp "$OUT/$apk" "$HOME/ytmusic-fire.apk"
+# keep only the three newest APKs
+ls -1t "$OUT"/ytmusic-fire-*.apk | tail -n +4 | xargs -r rm -f
+echo "Published v$name → $OUT/$apk  (sha256 ${sha:0:12}…)"
+echo "Tablets pick it up on their next check (app start, or ⋮ → Check for updates)."
