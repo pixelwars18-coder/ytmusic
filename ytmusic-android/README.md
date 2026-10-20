@@ -8,7 +8,7 @@ Output:  app/build/outputs/apk/release/app-release.apk  (signed with ytmusic.key
 
 Install:
   Allow installs from your browser / file manager ("Install unknown apps"),
-  then open the APK.  Or:  adb install -r ytmusic-fire.apk
+  then open the APK.  Or:  adb install -r app-release.apk
 
 Layout:  core/  YouTube access (NewPipeExtractor): search, playlists, stream URLs  (plain JVM, testable on a PC)
          app/   Android UI, playback service, downloads
