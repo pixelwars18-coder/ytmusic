@@ -31,6 +31,7 @@ import androidx.recyclerview.widget.RecyclerView
 import dev.ytmusic.core.PlaylistRef
 import dev.ytmusic.core.Section
 import dev.ytmusic.core.Track
+import dev.ytmusic.core.explicit
 import dev.ytmusic.core.Yt
 
 class MainActivity : Activity() {
@@ -699,6 +700,7 @@ class MainActivity : Activity() {
     private fun bindTrack(row: RowView, t: Track, index: Int, item: Item.T? = null) {
         row.vid = t.vid
         row.title = t.title
+        row.explicit = t.explicit
         row.sub = if (t.duration > 0) "${t.artist}  ·  ${Ui.fmtTime(t.duration)}" else t.artist
         row.thumbKey = "t:" + t.vid
         row.thumbUrl = Thumbs.trackUrl(t.vid)
@@ -730,6 +732,7 @@ class MainActivity : Activity() {
     }
 
     private fun bindRemote(row: RowView, ref: PlaylistRef) {
+        row.explicit = false
         row.vid = null
         row.title = ref.name
         row.sub = listOf(ref.uploader, if (ref.count > 0) "${ref.count} videos" else "").filter { it.isNotEmpty() }.joinToString("  ·  ")
@@ -745,6 +748,7 @@ class MainActivity : Activity() {
     }
 
     private fun bindSaved(row: RowView, p: SavedPlaylist) {
+        row.explicit = false
         row.vid = null
         row.title = p.name
         row.sub = (if (p.tracks.size == 1) "1 song" else "${p.tracks.size} songs") + if (p.source != null) "  ·  from YouTube" else ""

@@ -295,6 +295,30 @@ QString TrackList::emptyMessage() const {
     return {};
 }
 
+// Draws a song's artist line; explicit songs get a small rounded "E" tag in front.
+static void drawArtistLine(QPainter &p, const Palette &c, const QFont &f, const QRectF &r, const QString &text, bool isExplicit) {
+    p.setFont(f);
+    p.setPen(c.onSurfaceVariant);
+    qreal ax = r.left();
+    if (isExplicit) {
+        const QRectF tag(r.left(), r.top() + 4, 14, 14);
+        p.setPen(Qt::NoPen);
+        p.setBrush(c.onSurfaceVariant);
+        p.drawRoundedRect(tag, 3, 3);
+        QFont tf = f;
+        tf.setPixelSize(10);
+        tf.setBold(true);
+        p.setFont(tf);
+        p.setPen(c.surface);
+        p.drawText(tag, Qt::AlignCenter, QStringLiteral("E"));
+        p.setFont(f);
+        p.setPen(c.onSurfaceVariant);
+        ax += 20;
+    }
+    const int w = int(r.right() - ax);
+    p.drawText(QRectF(ax, r.top(), r.right() - ax, r.height()), Qt::AlignVCenter, QFontMetrics(f).elidedText(text, Qt::ElideRight, w));
+}
+
 void TrackList::paintEvent(QPaintEvent *) {
     QPainter p(viewport());
     p.setRenderHint(QPainter::Antialiasing);
@@ -398,10 +422,7 @@ void TrackList::paintEvent(QPaintEvent *) {
         p.setPen(active ? c.primary : c.onSurface);
         p.drawText(QRectF(tx, row.top() + 10, tw, 22), Qt::AlignVCenter,
                    QFontMetrics(fTitle).elidedText(title, Qt::ElideRight, int(tw)));
-        p.setFont(fArtist);
-        p.setPen(c.onSurfaceVariant);
-        p.drawText(QRectF(tx, row.top() + 32, tw, 20), Qt::AlignVCenter,
-                   QFontMetrics(fArtist).elidedText(sub, Qt::ElideRight, int(tw)));
+        drawArtistLine(p, c, fArtist, QRectF(tx, row.top() + 32, tw, 20), sub, t && t->isExplicit());
         auto hv = [&](Kind k) { return hover.kind == k && hover.idx == i; };
         if (selecting) {                                  // round checkbox instead of the buttons
             if (t) {
@@ -587,9 +608,7 @@ void TrackList::paintFeed(QPainter &p) {
         p.setFont(fTitle);
         p.setPen(active ? c.primary : c.onSurface);
         p.drawText(QRectF(tx, row.top() + 10, tw, 22), Qt::AlignVCenter, QFontMetrics(fTitle).elidedText(t.title, Qt::ElideRight, int(tw)));
-        p.setFont(fArtist);
-        p.setPen(c.onSurfaceVariant);
-        p.drawText(QRectF(tx, row.top() + 32, tw, 20), Qt::AlignVCenter, QFontMetrics(fArtist).elidedText(t.artist, Qt::ElideRight, int(tw)));
+        drawArtistLine(p, c, fArtist, QRectF(tx, row.top() + 32, tw, 20), t.artist, t.isExplicit());
         p.setFont(fDur);
         p.drawText(dur, Qt::AlignVCenter | Qt::AlignRight, fmtTime(t.duration));
         const bool liked = core->isLiked(t.vid);

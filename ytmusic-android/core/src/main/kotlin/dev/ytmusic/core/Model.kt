@@ -32,3 +32,7 @@ data class PlaylistRef(
 )
 
 class PlaylistPage(val items: List<PlaylistRef>, val more: (() -> PlaylistPage)?)
+
+private val EXPLICIT = Regex("(?i)(?<!non[- ])(?<!not )\\bexplicit\\b|🅴")
+/** YouTube search results carry no "explicit" flag; uploaders usually say so in the title, e.g. "(Explicit)". */
+val Track.explicit: Boolean get() = EXPLICIT.containsMatchIn(title)

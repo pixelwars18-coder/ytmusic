@@ -1,5 +1,6 @@
 #pragma once
 #include <QJsonObject>
+#include <QRegularExpression>
 #include <QString>
 #include <QVector>
 
@@ -8,6 +9,11 @@ struct Track {
     double duration = 0;
 
     bool operator==(const Track &o) const { return vid == o.vid; }
+    // YouTube search results carry no "explicit" flag; uploaders usually say so in the title, e.g. "(Explicit)".
+    bool isExplicit() const {
+        static const QRegularExpression re(QStringLiteral("(?<!non[- ])(?<!not )\\bexplicit\\b|\U0001F174"), QRegularExpression::CaseInsensitiveOption);
+        return re.match(title).hasMatch();
+    }
     QJsonObject toJson() const {
         return {{"vid", vid}, {"title", title}, {"artist", artist}, {"duration", duration}};
     }

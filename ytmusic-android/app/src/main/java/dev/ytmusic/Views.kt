@@ -234,6 +234,7 @@ class RowView(ctx: Context) : View(ctx) {
     init { isFocusable = false; if (android.os.Build.VERSION.SDK_INT >= 26) defaultFocusHighlightEnabled = false }
     var title = ""
     var sub = ""
+    var explicit = false             // draws the small "E" tag before the artist
     var vid: String? = null          // track rows: liked / download / active state
     var thumbKey = ""
     var thumbUrl = ""
@@ -250,6 +251,7 @@ class RowView(ctx: Context) : View(ctx) {
     private val tp = paint().apply { typeface = Ui.medium; textSize = Ui.dp(15) }
     private val sp = paint().apply { textSize = Ui.dp(12.5f) }
     private val bp = paint()
+    private val tagP = paint().apply { typeface = Ui.medium }
     private val rect = RectF()
     private val thumbRect = RectF()
     private val btn = Ui.dp(44)
@@ -311,7 +313,18 @@ class RowView(ctx: Context) : View(ctx) {
         tp.color = if (active) C.primary else C.onSurface
         c.drawText(TextUtils.ellipsize(title, tp, avail, TextUtils.TruncateAt.END).toString(), textX, h / 2f - Ui.dp(3), tp)
         sp.color = C.onSurfaceVariant
-        c.drawText(TextUtils.ellipsize(sub, sp, avail, TextUtils.TruncateAt.END).toString(), textX, h / 2f + Ui.dp(17), sp)
+        var subX = textX
+        if (explicit) {                        // small rounded "E" tag
+            val side = Ui.dp(14)
+            val base = h / 2f + Ui.dp(17)
+            rect.set(textX, base - side + Ui.dp(2.5f), textX + side, base + Ui.dp(2.5f))
+            bp.color = C.onSurfaceVariant; bp.style = Paint.Style.FILL
+            c.drawRoundRect(rect, Ui.dp(3), Ui.dp(3), bp)
+            tagP.color = C.surface; tagP.textSize = Ui.dp(10); tagP.textAlign = Paint.Align.CENTER
+            c.drawText("E", rect.centerX(), rect.bottom - Ui.dp(3), tagP)
+            subX += side + Ui.dp(6)
+        }
+        c.drawText(TextUtils.ellipsize(sub, sp, avail - (subX - textX), TextUtils.TruncateAt.END).toString(), subX, h / 2f + Ui.dp(17), sp)
 
         if (selecting) {                       // round checkbox
             val cx = w - Ui.dp(6) - btn / 2f; val cy = h / 2f
