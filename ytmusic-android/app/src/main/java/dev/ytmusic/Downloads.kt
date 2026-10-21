@@ -193,6 +193,7 @@ object Downloads {
                 if (!part.renameTo(target)) throw IOException("could not finalize file")
                 synchronized(done) { done[t.vid] = Meta(t, target.name, target.length()) }
                 saveIndex()
+                if (Settings.lyricsForDownloads) LyricsStore.fetchAsync(t)
                 return
             } catch (e: CancelledException) {
                 File(dir, "").listFiles()?.filter { it.name.endsWith(".part") && it.name.contains(t.vid) }?.forEach { it.delete() }

@@ -138,6 +138,9 @@ public slots:
     void openSaved(const QString &id);
     void closeSaved();
     void setSleep(int minutes);
+    int removeQueueDuplicates();           // keeps the first copy (and the playing one); returns how many went
+    QString exportBackup(const QString &path) const;   // error text, empty on success
+    QString importBackup(const QString &path, bool *ok); // merges; returns a summary or the error
     void clearRecentPlays();               // "Jump back in" + the For you shelves
     void setPageSize(int n);
     void setStartHidden(bool on);

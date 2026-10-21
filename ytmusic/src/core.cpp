@@ -942,6 +942,73 @@ void Core::clearRecentPlays() {
     emit listsChanged();
 }
 
+int Core::removeQueueDuplicates() {
+    QSet<QString> seen;
+    if (current >= 0 && current < queue.size()) seen.insert(queue[current].vid);
+    QVector<int> drop;
+    for (int i = 0; i < queue.size(); ++i)
+        if (i != current) {
+            if (seen.contains(queue[i].vid)) drop.append(i);
+            else seen.insert(queue[i].vid);
+        }
+    if (!drop.isEmpty()) removeFromQueueMany(drop);
+    return drop.size();
+}
+
+// Same format as the Android app's backup (vid/title/artist/duration), so a library can move between them.
+QString Core::exportBackup(const QString &path) const {
+    QJsonObject root{{"app", "ytmusic"}, {"version", 1}};
+    root["liked"] = tracksToJson(liked);
+    root["history"] = QJsonArray::fromStringList(history);
+    QJsonArray pa;
+    for (const SavedPlaylist &p : playlists)
+        pa.append(QJsonObject{{"id", p.id}, {"name", p.name}, {"source", p.source}, {"tracks", tracksToJson(p.tracks)}});
+    root["playlists"] = pa;
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly)) return f.errorString();
+    f.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    return f.commit() ? QString() : f.errorString();
+}
+
+QString Core::importBackup(const QString &path, bool *ok) {
+    *ok = false;
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return f.errorString();
+    const QJsonObject o = QJsonDocument::fromJson(f.readAll()).object();
+    if (o.value("app").toString() != QLatin1String("ytmusic")) return QStringLiteral("Not a YT Music backup");
+    int nLiked = 0, nPl = 0, nTracks = 0;
+    for (const Track &t : tracksFromJson(o.value("liked").toArray()))
+        if (!likedSet.contains(t.vid)) { liked.append(t); likedSet.insert(t.vid); ++nLiked; }
+    for (const QJsonValue &h : o.value("history").toArray())
+        if (!history.contains(h.toString())) history << h.toString();
+    for (const QJsonValue &v : o.value("playlists").toArray()) {
+        const QJsonObject po = v.toObject();
+        const QString id = po.value("id").toString();
+        const QVector<Track> tr = tracksFromJson(po.value("tracks").toArray());
+        SavedPlaylist *have = nullptr;
+        for (SavedPlaylist &p : playlists) if (p.id == id) have = &p;
+        if (!have) {
+            SavedPlaylist p;
+            p.id = id;
+            p.name = po.value("name").toString(QStringLiteral("Playlist"));
+            p.source = po.value("source").toString();
+            p.tracks = tr;
+            playlists.append(p);
+            ++nPl;
+            nTracks += tr.size();
+        } else {
+            QSet<QString> known;
+            for (const Track &t : std::as_const(have->tracks)) known.insert(t.vid);
+            for (const Track &t : tr) if (!known.contains(t.vid)) { have->tracks.append(t); known.insert(t.vid); ++nTracks; }
+        }
+    }
+    scheduleSave();
+    emit listsChanged();
+    emit settingsChanged();
+    *ok = true;
+    return QStringLiteral("Restored %1 liked songs, %2 playlists, %3 playlist songs").arg(nLiked).arg(nPl).arg(nTracks);
+}
+
 void Core::setPageSize(int n) {
     pageSize = qBound(10, n, 100);
     scheduleSave();

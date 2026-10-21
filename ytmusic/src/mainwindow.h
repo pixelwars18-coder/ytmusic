@@ -8,6 +8,7 @@
 class TrackList;
 class Toast;
 class PlayerBar;
+class LyricsView;
 class QMenu;
 class QAction;
 
@@ -94,6 +95,7 @@ private:
     SearchBox *search;
     TabsBar *tabs;
     TrackList *tracks;
+    LyricsView *lyricsView;
     PlayerBar *bar;
     Toast *toast = nullptr;
     QSystemTrayIcon *tray = nullptr;

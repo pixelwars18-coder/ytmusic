@@ -41,4 +41,9 @@ object Settings {
     var thumbnails: Boolean
         get() = prefs().getBoolean("thumbs", true)
         set(v) { prefs().edit().putBoolean("thumbs", v).apply() }
+
+    /** Fetch lyrics for every downloaded song (new downloads, and ones that don't have them yet). */
+    var lyricsForDownloads: Boolean
+        get() = prefs().getBoolean("lyricsDl", true)
+        set(v) { prefs().edit().putBoolean("lyricsDl", v).apply() }
 }

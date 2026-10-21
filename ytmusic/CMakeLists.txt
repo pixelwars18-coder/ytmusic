@@ -19,6 +19,7 @@ add_executable(ytmusic
     src/mpris.cpp
     src/ui_common.cpp
     src/tracklist.cpp
+    src/lyrics.cpp
     src/playerbar.cpp
     src/mainwindow.cpp
 )

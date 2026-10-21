@@ -3,6 +3,7 @@
 #include "mpris.h"
 #include "theme.h"
 #include <QApplication>
+#include <QKeyEvent>
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
 #include <QDBusInterface>
@@ -73,6 +74,10 @@ int main(int argc, char **argv) {
         win.show();
         const int tabIdx = args.value(2).toInt();
         win.setTab(tabIdx == 1 ? Tab::Queue : tabIdx == 2 ? Tab::Liked : tabIdx == 3 ? Tab::Saved : tabIdx == 4 ? Tab::Home : Tab::Results);
+        if (qEnvironmentVariableIsSet("YTMUSIC_SHOT_LYRICS")) { // dev: open the lyrics view
+            QKeyEvent ke(QEvent::KeyPress, Qt::Key_Y, Qt::NoModifier);
+            QCoreApplication::sendEvent(&win, &ke);
+        }
         const bool pl = args.value(4) == QLatin1String("pl");
         if (pl) core.setSearchMode(Core::SearchMode::Playlists);
         if (args.size() > 3 && !args.value(3).isEmpty() && args.value(3) != QLatin1String("-")) core.search(args.value(3));
@@ -94,7 +99,7 @@ int main(int argc, char **argv) {
         }
         if (args.value(5) == QLatin1String("opensaved"))
             QTimer::singleShot(500, &app, [&] { if (!core.playlists.isEmpty()) core.openSaved(core.playlists.first().id); });
-        QTimer::singleShot(tabIdx == 4 ? 20000 : (args.size() > 3 && args.value(3) != QLatin1String("-") ? 11000 : 1500), &app, [&] {
+        QTimer::singleShot(qEnvironmentVariableIsSet("YTMUSIC_SHOT_LYRICS") ? 7000 : tabIdx == 4 ? 20000 : (args.size() > 3 && args.value(3) != QLatin1String("-") ? 11000 : 1500), &app, [&] {
             win.snapshot().save(shotPath);
             app.quit();
         });

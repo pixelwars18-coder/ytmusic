@@ -49,6 +49,7 @@ class MainActivity : Activity() {
         object Footer : Item()
     }
 
+    private lateinit var lyrics: LyricsView
     private var tab = Tab.SEARCH
     private var savedId: String? = null  // saved playlist opened in the Playlists tab
 
@@ -193,10 +194,13 @@ class MainActivity : Activity() {
             onClose = { closeNowPlaying() }
             onSleep = { showSleepDialog() }
             onQueue = { closeNowPlaying(); selectTab(Tab.QUEUE) }
+            onLyrics = { Playback.current?.let { lyrics.open(it) } }
             onLike = { Playback.current?.let { Store.toggleLike(it) } }
             onDownload = { Playback.current?.let { toggleDownload(it) } }
         }
         root.addView(now, FrameLayout.LayoutParams(-1, -1))
+        lyrics = LyricsView(this).apply { visibility = View.GONE; onClose = { close() } }
+        root.addView(lyrics, FrameLayout.LayoutParams(-1, -1))
         setContentView(root)
         val pref = Settings.startTab
         val saved = if (pref == "LAST") getSharedPreferences("ui", MODE_PRIVATE).getString("tab", Tab.SEARCH.name) else pref
@@ -258,6 +262,7 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         when {
             selecting -> stopSelect()
+            lyrics.visibility == View.VISIBLE -> lyrics.close()
             now.visibility == View.VISIBLE -> closeNowPlaying()
             suggestBox.visibility == View.VISIBLE -> { closeSuggestions(); hideKeyboard() }
             tab == Tab.SEARCH && Library.detail != null -> Library.closeDetail()
@@ -584,6 +589,7 @@ class MainActivity : Activity() {
                 selectionChips(hasTracks)
                 if (hasTracks) {
                     pill("Save as playlist", "bookmark") { promptName("Save queue as playlist", "My queue") { n -> val p = Store.createPlaylist(n, tracks); toast("Saved “${p.name}”") } }
+                    pill("Remove duplicates", "trash") { removeQueueDuplicates() }
                     pill("Download all", "download") { Downloads.enqueue(this, tracks); toast("Downloading ${tracks.size} songs") }
                 }
             }
@@ -917,6 +923,32 @@ class MainActivity : Activity() {
         m.show()
     }
 
+    private val REQ_EXPORT = 4101
+    private val REQ_IMPORT = 4102
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        val uri = data?.data ?: return
+        if (resultCode != RESULT_OK) return
+        when (requestCode) {
+            REQ_EXPORT -> App.io.execute {
+                val msg = try {
+                    contentResolver.openOutputStream(uri, "wt")!!.use { it.write(Store.exportBackup().toByteArray()) }
+                    "Library exported"
+                } catch (e: Throwable) { Crash.record("export", e); "Export failed: ${e.message}" }
+                App.main.post { toast(msg) }
+            }
+            REQ_IMPORT -> App.io.execute {
+                val text = try { contentResolver.openInputStream(uri)!!.use { String(it.readBytes()) } } catch (e: Throwable) { null }
+                App.main.post {
+                    if (text == null) { toast("Couldn't read that file"); return@post }
+                    toast(try { Store.importBackup(text) } catch (e: Throwable) { "Not a valid backup: ${e.message}" })
+                }
+            }
+        }
+    }
+
     private fun showAppMenu(anchor: View) {
         val m = PopupMenu(this, anchor, Gravity.END)
         m.menu.add(0, 8, 0, "Settings")
@@ -1022,6 +1054,24 @@ class MainActivity : Activity() {
         }
         row("Clear picture cache", { Ui.fmtBytes(Thumbs.diskBytes()) }) { sv -> Thumbs.clearDisk(); sv.text = Ui.fmtBytes(Thumbs.diskBytes()) }
 
+        section("Lyrics")
+        toggle("Lyrics for downloads", "Fetch lyrics for downloaded songs so they work offline", { Settings.lyricsForDownloads }, { Settings.lyricsForDownloads = it; if (it) LyricsStore.sweepDownloads() })
+        row("Get missing lyrics now", { val n = LyricsStore.missingForDownloads().size; if (n == 0) "All downloaded songs are covered" else "$n downloaded songs without lyrics" }) { sv ->
+            val n = LyricsStore.missingForDownloads().size
+            if (n == 0) toast("Nothing to fetch") else { toast("Fetching lyrics for $n songs…"); LyricsStore.sweepDownloads { got -> sv.text = "Found lyrics for $got of $n"; toast("Found lyrics for $got of $n") } }
+        }
+
+        section("Backup")
+        row("Export library", { "Likes, playlists and searches to a file" }) {
+            val i = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/json")
+                .putExtra(Intent.EXTRA_TITLE, "ytmusic-backup.json")
+            startActivityForResult(i, REQ_EXPORT)
+        }
+        row("Restore from file", { "Adds what's in a backup; nothing is removed" }) {
+            val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+            startActivityForResult(i, REQ_IMPORT)
+        }
+
         section("About")
         row("Last error", { "Shows the most recent crash or playback error" }) { showCrash() }
         row("YT Music", { "Version ${Updater.currentName()} (${Updater.currentCode()})" }, null)
@@ -1048,6 +1098,18 @@ class MainActivity : Activity() {
         val text = Crash.last() ?: "No errors recorded."
         AlertDialog.Builder(this).setTitle("Last error").setMessage(text)
             .setPositiveButton("Close", null).setNeutralButton("Clear") { _, _ -> Crash.clear() }.show()
+    }
+
+    /** Keeps the first copy of every song in the queue (the one playing now is never removed). */
+    private fun removeQueueDuplicates() {
+        val q = Playback.queue()
+        val playing = Playback.player?.currentMediaItemIndex ?: -1
+        val seen = HashSet<String>()
+        val drop = ArrayList<Int>()
+        q.forEachIndexed { i, t -> if (i == playing) seen += t.vid }
+        q.forEachIndexed { i, t -> if (i != playing && !seen.add(t.vid)) drop += i }
+        drop.sortedDescending().forEach { Playback.removeAt(it) }
+        toast(if (drop.isEmpty()) "No duplicates in the queue" else "Removed ${drop.size} duplicate${if (drop.size == 1) "" else "s"}")
     }
 
     private fun addToPlaylistDialog(tracks: List<Track>) {

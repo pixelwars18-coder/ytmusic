@@ -83,6 +83,53 @@ object Store {
         }
     }
 
+    // ---- backup / restore: one JSON format shared with the desktop app (vid/title/artist/duration) ----
+    private fun bj(t: Track) = JSONObject().put("vid", t.vid).put("title", t.title).put("artist", t.artist).put("duration", t.duration)
+    private fun jb(o: JSONObject) = Track(o.getString("vid"), o.optString("title"), o.optString("artist"), o.optDouble("duration", 0.0).toLong())
+    private fun bTracks(a: JSONArray?): List<Track> {
+        val out = ArrayList<Track>()
+        if (a != null) for (i in 0 until a.length()) try { out += jb(a.getJSONObject(i)) } catch (_: Throwable) { }
+        return out
+    }
+
+    fun exportBackup(): String {
+        val root = JSONObject().put("app", "ytmusic").put("version", 1)
+        root.put("liked", JSONArray().also { a -> liked.forEach { a.put(bj(it)) } })
+        root.put("history", JSONArray(history))
+        root.put("playlists", JSONArray().also { a ->
+            playlists.forEach { p ->
+                a.put(JSONObject().put("id", p.id).put("name", p.name).put("source", p.source ?: "")
+                    .put("tracks", JSONArray().also { ta -> p.tracks.forEach { ta.put(bj(it)) } }))
+            }
+        })
+        return root.toString(2)
+    }
+
+    /** Merges a backup into the library (nothing is removed). Returns a short summary. */
+    fun importBackup(text: String): String {
+        val o = JSONObject(text)
+        if (o.optString("app") != "ytmusic") throw IllegalArgumentException("Not a YT Music backup")
+        var nLiked = 0; var nPl = 0; var nTracks = 0
+        for (t in bTracks(o.optJSONArray("liked"))) if (likedSet.add(t.vid)) { liked += t; nLiked++ }
+        o.optJSONArray("history")?.let { a -> for (i in 0 until a.length()) { val q = a.getString(i); if (q !in history) history += q } }
+        o.optJSONArray("playlists")?.let { a ->
+            for (i in 0 until a.length()) {
+                val po = a.getJSONObject(i)
+                val id = po.getString("id")
+                val tr = bTracks(po.optJSONArray("tracks"))
+                val have = playlists.firstOrNull { it.id == id }
+                if (have == null) {
+                    playlists += SavedPlaylist(id, po.optString("name", "Playlist"), ArrayList(tr), po.optString("source").ifEmpty { null }); nPl++; nTracks += tr.size
+                } else {
+                    val known = have.tracks.map { it.vid }.toHashSet()
+                    for (t in tr) if (known.add(t.vid)) { have.tracks += t; nTracks++ }
+                }
+            }
+        }
+        changed()
+        return "Restored $nLiked liked songs, $nPl playlists, $nTracks playlist songs"
+    }
+
     fun scheduleSave() {
         App.main.removeCallbacks(saveRunnable)
         App.main.postDelayed(saveRunnable, 1000)

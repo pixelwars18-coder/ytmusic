@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "playerbar.h"
+#include "lyrics.h"
 #include "tracklist.h"
 #include "paths.h"
 #include "ui_common.h"
@@ -11,6 +12,7 @@
 #include <QGuiApplication>
 #include <QInputDialog>
 #include <QMessageBox>
+#include <QFileDialog>
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QFileInfo>
@@ -175,6 +177,7 @@ QVector<TabsBar::Item> TabsBar::items() const {
     auto addR = [&](int id, const QString &label, const QString &icon) { r.append({QRectF(), id, label, icon, false}); };
     addR(9, QString(), QStringLiteral("x"));
     addR(8, QString(), QStringLiteral("gear"));
+    addR(7, QString(), QStringLiteral("lyrics"));
     const bool canSel = tab == Tab::Queue || tab == Tab::Liked || tab == Tab::Saved;
     const bool savedList = tab == Tab::Saved && !savedOpen;
     const bool anything = savedList ? !core->playlists.isEmpty() : hasTracks;
@@ -187,6 +190,7 @@ QVector<TabsBar::Item> TabsBar::items() const {
     } else if (tab == Tab::Queue) {
         if (!core->queue.isEmpty()) {
             addR(13, QStringLiteral("Clear"), QStringLiteral("trash"));
+            addR(55, QStringLiteral("Remove duplicates"), QStringLiteral("x"));
             addR(50, QStringLiteral("Select"), QStringLiteral("check"));
             addR(18, QStringLiteral("Save as playlist"), QStringLiteral("bookmark"));
         }
@@ -204,12 +208,12 @@ QVector<TabsBar::Item> TabsBar::items() const {
     }
     // not enough room beside the tabs: the action pills shrink to icon-only
     qreal need = 0;
-    for (const Item &it : std::as_const(r)) need += (it.id == 9 || it.id == 8 ? 30 : pillWidth(it.label, it.icon)) + 8;
+    for (const Item &it : std::as_const(r)) need += (it.id == 9 || it.id == 8 || it.id == 7 ? 30 : pillWidth(it.label, it.icon)) + 8;
     const bool compact = x + need + 16 > width();
     qreal rx = width();
     for (Item &it : r) {
-        if (compact && it.id != 9 && it.id != 8 && !it.icon.isEmpty()) it.label.clear();
-        if (it.id == 9 || it.id == 8 || (compact && it.label.isEmpty() && !it.icon.isEmpty())) {
+        if (compact && it.id != 9 && it.id != 8 && it.id != 7 && !it.icon.isEmpty()) it.label.clear();
+        if (it.id == 9 || it.id == 8 || it.id == 7 || (compact && it.label.isEmpty() && !it.icon.isEmpty())) {
             it.r = QRectF(rx - 30, 1, 30, 30);
             rx -= 38;
         } else {
@@ -306,6 +310,7 @@ MainWindow::MainWindow(Core *c, Mpris *mpris) : core(c) {
     search = new SearchBox(this);
     tabs = new TabsBar(core, this);
     tracks = new TrackList(core, this);
+    lyricsView = new LyricsView(core, this);
     bar = new PlayerBar(core, this);
     toast = new Toast(this);
 
@@ -428,6 +433,7 @@ void MainWindow::resizeEvent(QResizeEvent *) {
     const int barY = height() - m - 92;
     bar->setGeometry(m, barY, w, 92);
     tracks->setGeometry(m, top, w, barY - 16 - top);
+    lyricsView->setGeometry(tracks->geometry());
 }
 
 void MainWindow::paintEvent(QPaintEvent *) {
@@ -515,7 +521,8 @@ void MainWindow::keyPressEvent(QKeyEvent *e) {
     case Qt::Key_Right: core->seekBy(5); break;
     case Qt::Key_Up: core->setVolume(core->volume + 5); break;
     case Qt::Key_Down: core->setVolume(core->volume - 5); break;
-    case Qt::Key_Escape: hide(); break;
+    case Qt::Key_Y: lyricsView->toggle(); break;
+    case Qt::Key_Escape: if (lyricsView->isVisible()) lyricsView->closeView(); else hide(); break;
     default: QWidget::keyPressEvent(e);
     }
 }
@@ -690,6 +697,23 @@ void MainWindow::openSettings() {
         btnThumbs->setText(thumbLabel());
     });
 
+    auto *btnExport = new QPushButton(QStringLiteral("Export library…"));
+    auto *btnImport = new QPushButton(QStringLiteral("Restore from file…"));
+    lay->addRow(btnExport);
+    lay->addRow(btnImport);
+    connect(btnExport, &QPushButton::clicked, &dlg, [this] {
+        const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Export library"), QDir::homePath() + QStringLiteral("/ytmusic-backup.json"), QStringLiteral("JSON (*.json)"));
+        if (path.isEmpty()) return;
+        const QString err = core->exportBackup(path);
+        showToast(err.isEmpty() ? QStringLiteral("Library exported") : QStringLiteral("Export failed: ") + err);
+    });
+    connect(btnImport, &QPushButton::clicked, &dlg, [this] {
+        const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Restore from file"), QDir::homePath(), QStringLiteral("JSON (*.json)"));
+        if (path.isEmpty()) return;
+        bool ok = false;
+        showToast(core->importBackup(path, &ok));
+    });
+
     auto *about = new QLabel(QStringLiteral("Likes, playlists and history are stored in\n%1").arg(Paths::stateDir()));
     about->setEnabled(false);
     lay->addRow(about);
@@ -778,6 +802,7 @@ void MainWindow::onAction(int id) {
     bool ok = false;
     switch (id) {
     case 8: openSettings(); break;
+    case 7: lyricsView->toggle(); break;
     case 10: core->playFrom(t, 0, false); break;
     case 11: core->playFrom(t, 0, true); break;
     case 12: core->enqueueAll(t); showToast(QStringLiteral("Added %1 songs to the queue").arg(core->list(t).size())); break;
@@ -787,6 +812,7 @@ void MainWindow::onAction(int id) {
         break;
     case 50: tracks->startSelect(); break;
     case 51: deleteAllItems(); break;
+    case 55: { const int n = core->removeQueueDuplicates(); showToast(n ? QStringLiteral("Removed %1 duplicate%2").arg(n).arg(n == 1 ? "" : "s") : QStringLiteral("No duplicates in the queue")); break; }
     case 52: tracks->stopSelect(); break;
     case 53: tracks->selectAll(); break;
     case 54: deleteSelected(); break;

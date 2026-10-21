@@ -26,6 +26,7 @@ object Icons {
         "clock" to "M21 12 a9 9 0 1 1 -18 0 a9 9 0 1 1 18 0 M12 7 v5 l3 2",
         "download" to "M12 4 v11 M7 11 l5 5 l5 -5 M5 20 h14",
         "check" to "M5 12 l5 5 l9 -10",
+        "lyrics" to "M4 7 h16 M4 12 h16 M4 17 h10",
         "bookmark" to "M7 4 h10 v16 l-5 -4 l-5 4 z",
         "moon" to "M12 3 a9 9 0 1 0 9 9 a7 7 0 0 1 -9 -9 z",
         "chevronDown" to "M6 9 l6 6 l6 -6",

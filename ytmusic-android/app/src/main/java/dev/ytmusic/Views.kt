@@ -471,8 +471,9 @@ class NowPlayingView(ctx: Context) : View(ctx) {
     var onQueue: (() -> Unit)? = null
     var onDownload: (() -> Unit)? = null
     var onLike: (() -> Unit)? = null
+    var onLyrics: (() -> Unit)? = null
 
-    private enum class Id { CLOSE, QUEUE, HEART, SHUFFLE, PREV, REPLAY, PLAY, FORWARD, NEXT, REPEAT, SPEED, SLEEP, DOWNLOAD, SEEK }
+    private enum class Id { CLOSE, QUEUE, LYRICS, HEART, SHUFFLE, PREV, REPLAY, PLAY, FORWARD, NEXT, REPEAT, SPEED, SLEEP, DOWNLOAD, SEEK }
     private class Hit(val id: Id, val r: RectF)
 
     private val hits = ArrayList<Hit>()
@@ -518,6 +519,7 @@ class NowPlayingView(ctx: Context) : View(ctx) {
 
         btn(Id.CLOSE, pad, Ui.dp(36), Ui.dp(48))
         btn(Id.QUEUE, w - pad, Ui.dp(36), Ui.dp(48))
+        btn(Id.LYRICS, w - pad - Ui.dp(52), Ui.dp(36), Ui.dp(48))
 
         // bottom-up stack
         val rowB = h - Ui.dp(46)
@@ -626,6 +628,7 @@ class NowPlayingView(ctx: Context) : View(ctx) {
         when (hit.id) {
             Id.CLOSE -> Icons.draw(c, "chevronDown", cx, cy, Ui.dp(28), on)
             Id.QUEUE -> Icons.draw(c, "list", cx, cy, Ui.dp(24), on)
+            Id.LYRICS -> Icons.draw(c, "lyrics", cx, cy, Ui.dp(24), on)
             Id.SLEEP -> {
                 val active = Playback.sleepEndsAt > 0
                 Icons.draw(c, "moon", cx, cy - (if (active) Ui.dp(4) else 0f), Ui.dp(22), if (active) C.tertiary else C.onSurfaceVariant)
@@ -738,6 +741,7 @@ class NowPlayingView(ctx: Context) : View(ctx) {
         when (id) {
             Id.CLOSE -> onClose?.invoke()
             Id.QUEUE -> onQueue?.invoke()
+            Id.LYRICS -> onLyrics?.invoke()
             Id.SLEEP -> onSleep?.invoke()
             Id.SHUFFLE -> Playback.toggleShuffle()
             Id.PREV -> Playback.prev()

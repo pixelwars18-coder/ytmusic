@@ -21,6 +21,8 @@ class App : Application() {
         Thumbs.init(this)
         ForYou.init(this)
         Downloads.init(this)
+        LyricsStore.init(this)
+        main.postDelayed({ if (Settings.lyricsForDownloads) LyricsStore.sweepDownloads() }, 20_000)   // after start-up has settled
         Playback.connect(this)
         io.execute { try { Yt.init() } catch (_: Throwable) { } }
     }
