@@ -22,6 +22,8 @@ add_executable(ytmusic
     src/lyrics.cpp
     src/playerbar.cpp
     src/mainwindow.cpp
+    src/downloads.cpp
+    src/settings.cpp
 )
 target_link_libraries(ytmusic PRIVATE Qt6::Widgets Qt6::DBus)
 target_compile_definitions(ytmusic PRIVATE QT_NO_CAST_TO_ASCII QT_NO_FOREACH)

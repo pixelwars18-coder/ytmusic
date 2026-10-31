@@ -24,7 +24,14 @@
 static QString watchUrl(const QString &vid) { return QStringLiteral("https://www.youtube.com/watch?v=") + vid; }
 
 Core::Core(QObject *parent) : QObject(parent) {
+    downloads = new Downloads(this);
+    connect(downloads, &Downloads::message, this, &Core::message);
     load();
+    downloads->rescan();
+    loadUrlCache();
+    urlSaveTimer.setSingleShot(true);
+    urlSaveTimer.setInterval(3000);
+    connect(&urlSaveTimer, &QTimer::timeout, this, &Core::saveUrlCache);
     saveTimer.setSingleShot(true);
     saveTimer.setInterval(600);
     connect(&saveTimer, &QTimer::timeout, this, &Core::save);
@@ -32,7 +39,7 @@ Core::Core(QObject *parent) : QObject(parent) {
     sleepTimer.setInterval(5000);
     connect(&sleepTimer, &QTimer::timeout, this, &Core::checkSleep);
 
-    connectTimer.setInterval(300);
+    connectTimer.setInterval(25);   // mpv's IPC socket is usually up within ~50 ms
     connect(&connectTimer, &QTimer::timeout, this, &Core::tryConnect);
     posThrottle.start();
     // mpv is started on first playback and shut down again after a long idle period
@@ -56,6 +63,7 @@ void Core::shutdown() {
         mpvProc = nullptr;
     }
     save();
+    saveUrlCache();
 }
 
 // ---------------------------------------------------------------- persistence
@@ -88,6 +96,9 @@ void Core::load() {
     closeToTray = o.value("closeToTray").toBool(true);
     audioQuality = qBound(0, o.value("audioQuality").toInt(0), 2);
     memoryMode = qBound(0, o.value("memoryMode").toInt(1), 2);
+    if (o.contains("downloadDir") && !o.value("downloadDir").toString().isEmpty()) downloads->dir = o.value("downloadDir").toString();
+    downloads->format = qBound(0, o.value("downloadFormat").toInt(0), 1);
+    downloads->embedTags = o.value("downloadTags").toBool(true);
     searchLimit = pageSize;
     shuffle = o.value("shuffle").toBool(false);
     repeat = qBound(0, o.value("repeatMode").toInt(0), 2);
@@ -134,6 +145,9 @@ void Core::save() {
     o["closeToTray"] = closeToTray;
     o["audioQuality"] = audioQuality;
     o["memoryMode"] = memoryMode;
+    o["downloadDir"] = downloads->dir;
+    o["downloadFormat"] = downloads->format;
+    o["downloadTags"] = downloads->embedTags;
     o["shuffle"] = shuffle;
     o["repeatMode"] = repeat;
     o["historyJson"] = dumpArray(QJsonArray::fromStringList(history));
@@ -349,6 +363,12 @@ void Core::onEndFile(const QString &reason) {
         else next(true);
     } else if (reason == QLatin1String("error")) {
         const Track *t = nowPlaying();
+        if (usedLocal && t && !retried) {   // downloaded file unreadable or gone: stream it instead
+            retried = true;
+            usedLocal = false;
+            streamTrack(*t);
+            return;
+        }
         if (usedDirect && t && !retried) { // resolved URL expired: resolve afresh, once
             retried = true;
             urlCache.remove(t->vid);
@@ -383,12 +403,65 @@ void Core::preloadNext() {
     resolveUrl(queue[nextPick].vid);
 }
 
-void Core::resolveUrl(const QString &vid) {
-    auto it = urlCache.constFind(vid);
-    if (it != urlCache.constEnd() && it->when.secsTo(QDateTime::currentDateTime()) < 3600 * 4) return;
-    if (resolving.contains(vid)) return;
+// Stream URLs carry their own expiry ("expire=<epoch>", ~6 h); trust them until 10 min before that.
+qint64 Core::urlExpiry(const QString &url) {
+    static const QRegularExpression re(QStringLiteral("[?&/]expire[=/](\\d{9,11})"));
+    const auto m = re.match(url);
+    return m.hasMatch() ? m.captured(1).toLongLong() : 0;
+}
+
+bool Core::fresh(const QString &vid) const {
+    const auto it = urlCache.constFind(vid);
+    if (it == urlCache.constEnd()) return false;
+    if (it->expires > 0) return QDateTime::currentSecsSinceEpoch() < it->expires - 600;
+    return it->when.secsTo(QDateTime::currentDateTime()) < 3600 * 4;
+}
+
+static QString urlCachePath() { return Paths::cacheDir() + QStringLiteral("/urls.json"); }
+
+// Resolved URLs survive restarts, so songs played (or hovered) recently start instantly.
+void Core::loadUrlCache() {
+    QFile f(urlCachePath());
+    if (!f.open(QIODevice::ReadOnly)) return;
+    const QJsonObject o = QJsonDocument::fromJson(f.readAll()).object();
+    if (o.value("quality").toInt(-1) != audioQuality) return;
+    const QJsonObject u = o.value("urls").toObject();
+    const qint64 now = QDateTime::currentSecsSinceEpoch();
+    for (auto it = u.constBegin(); it != u.constEnd(); ++it) {
+        const QJsonObject e = it.value().toObject();
+        const qint64 exp = qint64(e.value("exp").toDouble());
+        if (exp > now + 900) urlCache.insert(it.key(), {e.value("url").toString(), QDateTime::fromSecsSinceEpoch(qint64(e.value("at").toDouble())), exp});
+    }
+}
+
+void Core::saveUrlCache() {
+    if (!loaded) return;
+    QJsonObject u;
+    const qint64 now = QDateTime::currentSecsSinceEpoch();
+    for (auto it = urlCache.constBegin(); it != urlCache.constEnd(); ++it)
+        if (it->expires > now + 900)
+            u.insert(it.key(), QJsonObject{{"url", it->url}, {"at", double(it->when.toSecsSinceEpoch())}, {"exp", double(it->expires)}});
+    QDir().mkpath(Paths::cacheDir());
+    QSaveFile f(urlCachePath());
+    if (f.open(QIODevice::WriteOnly)) {
+        f.write(QJsonDocument(QJsonObject{{"quality", audioQuality}, {"urls", u}}).toJson(QJsonDocument::Compact));
+        f.commit();
+    }
+}
+
+void Core::prefetch(const QString &vid) {
+    if (vid.isEmpty() || fresh(vid) || resolving.contains(vid) || !downloads->pathFor(vid).isEmpty()) return;
+    if (speculative >= 2) return;   // don't pile up yt-dlp processes while the mouse sweeps across a list
+    ++speculative;
+    resolveUrl(vid, true);
+}
+
+void Core::resolveUrl(const QString &vid, bool spec) {
+    if (fresh(vid) || resolving.contains(vid)) { if (spec) --speculative; return; }
     auto *p = new QProcess(this);
     resolving.insert(vid, p);
+    if (spec) connect(p, &QProcess::finished, this, [this] { --speculative; });
+    if (spec) connect(p, &QProcess::errorOccurred, this, [this](QProcess::ProcessError e) { if (e == QProcess::FailedToStart) --speculative; });
     connect(p, &QProcess::errorOccurred, this, [this, vid, p](QProcess::ProcessError e) {
         if (e != QProcess::FailedToStart) return;
         resolving.remove(vid);
@@ -400,7 +473,10 @@ void Core::resolveUrl(const QString &vid) {
         resolving.remove(vid);
         const QString url = QString::fromUtf8(p->readAllStandardOutput()).trimmed().section('\n', 0, 0);
         const bool ok = code == 0 && url.startsWith(QLatin1String("http"));
-        if (ok) urlCache.insert(vid, {url, QDateTime::currentDateTime()});
+        if (ok) {
+            urlCache.insert(vid, {url, QDateTime::currentDateTime(), urlExpiry(url)});
+            urlSaveTimer.start();
+        }
         p->deleteLater();
         if (waitingVid == vid) {
             waitingVid.clear();
@@ -416,21 +492,38 @@ void Core::resolveUrl(const QString &vid) {
 void Core::loadResolved(const QString &vid) {
     const auto it = urlCache.constFind(vid);
     if (it == urlCache.constEnd() || nowVid() != vid) return;
+    loadUrl(it->url);
     usedDirect = true;
+}
+
+void Core::loadUrl(const QString &url) {
+    const QString vid = nowVid();
     QString opts = QStringLiteral("pause=no");
     if (resumeVid == vid && resumeAt > 1) opts += QStringLiteral(",start=%1").arg(resumeAt, 0, 'f', 1);
     resumeVid.clear();
     if (speed != 1.0) opts += QStringLiteral(",speed=%1").arg(speed);
-    mpv({QStringLiteral("loadfile"), it->url, QStringLiteral("replace"), -1, opts});
+    mpv({QStringLiteral("loadfile"), url, QStringLiteral("replace"), -1, opts});
 }
 
 // mpv itself runs without the youtube-dl hook (smaller, no Lua): we always hand it a
 // direct stream URL, either preloaded earlier or resolved right now.
 void Core::loadTrack(const Track &t) {
+    usedDirect = usedLocal = false;
+    waitingVid.clear();
+    ensureMpv();   // warm mpv up while yt-dlp works, instead of starting it afterwards
+    const QString local = downloads->pathFor(t.vid);
+    if (!local.isEmpty()) {   // downloaded: play the file, no network round trip at all
+        usedLocal = true;
+        loadUrl(local);
+        return;
+    }
+    streamTrack(t);
+}
+
+void Core::streamTrack(const Track &t) {
     usedDirect = false;
     waitingVid.clear();
-    auto it = urlCache.constFind(t.vid);
-    if (it != urlCache.constEnd() && it->when.secsTo(QDateTime::currentDateTime()) < 3600 * 4) {
+    if (fresh(t.vid)) {
         loadResolved(t.vid);
     } else {
         waitingVid = t.vid;
@@ -543,6 +636,7 @@ void Core::search(const QString &qIn, bool more) {
         parse(true);
         searching = false;
         if (hasResults()) status.clear();
+        if (searchMode == SearchMode::Songs && !results.isEmpty() && searchLimit == pageSize) prefetch(results.first().vid);
         else {
             const QString e = firstLine(p->readAllStandardError());
             status = e.isEmpty() ? QStringLiteral("No results") : e;
@@ -1022,11 +1116,27 @@ void Core::setCloseToTray(bool on) {
 void Core::setAudioQuality(int q) {
     audioQuality = qBound(0, q, 2);
     urlCache.clear(); // cached URLs are for the old format
+    urlSaveTimer.start();
     scheduleSave();
 }
 
 void Core::setMemoryMode(int m) {
     memoryMode = qBound(0, m, 2);
+    scheduleSave();
+}
+
+void Core::setDownloadDir(const QString &d) {
+    downloads->setDir(d);
+    scheduleSave();
+}
+
+void Core::setDownloadFormat(int f) {
+    downloads->format = qBound(0, f, 1);
+    scheduleSave();
+}
+
+void Core::setDownloadTags(bool on) {
+    downloads->embedTags = on;
     scheduleSave();
 }
 

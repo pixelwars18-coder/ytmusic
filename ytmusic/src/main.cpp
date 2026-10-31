@@ -2,6 +2,8 @@
 #include "mainwindow.h"
 #include "mpris.h"
 #include "theme.h"
+#include "settings.h"
+#include <QMenu>
 #include <QApplication>
 #include <QKeyEvent>
 #include <QDBusConnection>
@@ -11,6 +13,8 @@
 #include <QSocketNotifier>
 #include <QStyleFactory>
 #include <QTimer>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <csignal>
 #include <malloc.h>
 #include <unistd.h>
@@ -99,6 +103,40 @@ int main(int argc, char **argv) {
         }
         if (args.value(5) == QLatin1String("opensaved"))
             QTimer::singleShot(500, &app, [&] { if (!core.playlists.isEmpty()) core.openSaved(core.playlists.first().id); });
+        if (qEnvironmentVariableIsSet("YTMUSIC_SHOT_SETTINGS")) { // dev: render the settings window
+            QTimer::singleShot(600, &app, [&] {
+                auto *dlg = new SettingsDialog(&core, &win);
+                dlg->show();
+                QTimer::singleShot(400, &app, [&, dlg] {
+                    if (int y = qEnvironmentVariableIntValue("YTMUSIC_SHOT_SETTINGS")) if (auto *sa = dlg->findChild<QScrollArea *>()) sa->verticalScrollBar()->setValue(y);
+                    QPixmap pm(dlg->size());
+                    pm.fill(Qt::transparent);
+                    dlg->render(&pm);
+                    pm.save(shotPath);
+                    app.quit();
+                });
+            });
+            return app.exec();
+        }
+        if (qEnvironmentVariableIsSet("YTMUSIC_SHOT_MENU")) { // dev: render a styled context menu
+            QTimer::singleShot(600, &app, [&] {
+                auto *m = new QMenu(&win);
+                m->addAction(QStringLiteral("Play next"));
+                m->addAction(QStringLiteral("Add to queue"));
+                m->addAction(QStringLiteral("Start radio"));
+                m->addSeparator();
+                m->addAction(QStringLiteral("Download to this PC"));
+                m->popup(QPoint(0, 0));
+                QTimer::singleShot(300, &app, [&, m] {
+                    QPixmap pm(m->size());
+                    pm.fill(Qt::transparent);
+                    m->render(&pm);
+                    pm.save(shotPath);
+                    app.quit();
+                });
+            });
+            return app.exec();
+        }
         QTimer::singleShot(qEnvironmentVariableIsSet("YTMUSIC_SHOT_LYRICS") ? 7000 : tabIdx == 4 ? 20000 : (args.size() > 3 && args.value(3) != QLatin1String("-") ? 11000 : 1500), &app, [&] {
             win.snapshot().save(shotPath);
             app.quit();

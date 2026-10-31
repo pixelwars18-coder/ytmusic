@@ -28,6 +28,9 @@ const QHash<QString, QString> &paths() {
         {"gear", "M15 12 a3 3 0 1 1 -6 0 a3 3 0 1 1 6 0 M12 3 v3 M12 18 v3 M3 12 h3 M18 12 h3 M5.6 5.6 l2.1 2.1 M16.3 16.3 l2.1 2.1 M5.6 18.4 l2.1 -2.1 M16.3 7.7 l2.1 -2.1"},
         {"lyrics", "M4 7 h16 M4 12 h16 M4 17 h10"},
         {"check", "M5 12 l5 5 l9 -10"},
+        {"down", "M6 9 l6 6 l6 -6"},
+        {"download", "M12 4 v11 M7 10 l5 5 l5 -5 M5 20 h14"},
+        {"folder", "M4 6 a1 1 0 0 1 1 -1 h4 l2 2 h8 a1 1 0 0 1 1 1 v10 a1 1 0 0 1 -1 1 h-14 a1 1 0 0 1 -1 -1 z"},
         {"clock", "M21 12 a9 9 0 1 1 -18 0 a9 9 0 1 1 18 0 M12 7 v5 l3 2"},
     };
     return h;

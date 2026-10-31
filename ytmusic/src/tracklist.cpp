@@ -18,6 +18,12 @@ TrackList::TrackList(Core *c, QWidget *parent) : QAbstractScrollArea(parent), co
     spin.setInterval(50);
     connect(&spin, &QTimer::timeout, viewport(), qOverload<>(&QWidget::update));
     connect(&Thumbs::I(), &Thumbs::ready, viewport(), qOverload<>(&QWidget::update));
+    connect(core->downloads, &Downloads::changed, viewport(), qOverload<>(&QWidget::update));
+    dwell.setSingleShot(true);
+    dwell.setInterval(180);
+    connect(&dwell, &QTimer::timeout, this, [this] {
+        if (const Track *t = trackAt(hover)) core->prefetch(t->vid);
+    });
     connect(verticalScrollBar(), &QScrollBar::valueChanged, viewport(), qOverload<>(&QWidget::update));
     auto restyle = [this] {
         verticalScrollBar()->setStyleSheet(QStringLiteral(
@@ -200,13 +206,54 @@ TrackList::Hit TrackList::hitTest(const QPoint &pt) const {
 void TrackList::mouseMoveEvent(QMouseEvent *e) {
     const Hit h = hitTest(e->position().toPoint());
     if (h.kind != hover.kind || h.idx != hover.idx) {
+        if (h.idx != hover.idx) { if (h.kind == None) dwell.stop(); else dwell.start(); }
         hover = h;
         viewport()->setCursor(h.kind == None ? Qt::ArrowCursor : Qt::PointingHandCursor);
         viewport()->update();
     }
 }
 
+const Track *TrackList::trackAt(const Hit &h) const {
+    if (h.kind == None || h.idx < 0 || selecting) return nullptr;
+    if (feedMode()) {
+        if (h.idx >= feedItems.size() || feedItems[h.idx].kind != 2) return nullptr;
+        const FeedItem &it = feedItems[h.idx];
+        if (it.section >= feedSecs.size() || it.track >= feedSecs[it.section].tracks.size()) return nullptr;
+        return &feedSecs[it.section].tracks[it.track];
+    }
+    if (cardMode() || (h.kind != Row && h.kind != Like && h.kind != AddPl && h.kind != Act1 && h.kind != Act2)) return nullptr;
+    const QVector<Track> &items = core->list(tab);
+    return h.idx < items.size() ? &items[h.idx] : nullptr;
+}
+
+// Small round badge in the thumbnail's corner: progress ring while downloading, a check once it's on this PC.
+void TrackList::drawDlBadge(QPainter &p, const QRectF &th, const QString &vid) const {
+    const Downloads *d = core->downloads;
+    const bool done = d->isDownloaded(vid), active = d->isActive(vid);
+    if (!done && !active) return;
+    const Palette &c = P();
+    const QRectF b(th.right() - 21, th.bottom() - 21, 18, 18);
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setPen(Qt::NoPen);
+    p.setBrush(done ? c.primary : QColor(7, 7, 34, 215));
+    p.drawEllipse(b);
+    if (done) {
+        Icons::paint(p, b.adjusted(4, 4, -4, -4), QStringLiteral("check"), c.onPrimary);
+    } else {
+        p.setPen(QPen(c.outline, 2));
+        p.drawEllipse(b.adjusted(2.5, 2.5, -2.5, -2.5));
+        if (d->isRunning(vid)) {
+            p.setPen(QPen(c.primary, 2, Qt::SolidLine, Qt::RoundCap));
+            p.drawArc(b.adjusted(2.5, 2.5, -2.5, -2.5), 90 * 16, -int(qMax(0.04, d->progress(vid)) * 360 * 16));
+        }
+        Icons::paint(p, b.adjusted(5, 5, -5, -5), QStringLiteral("download"), c.onSurface);
+    }
+    p.restore();
+}
+
 void TrackList::leaveEvent(QEvent *) {
+    dwell.stop();
     hover = {};
     viewport()->update();
 }
@@ -389,7 +436,7 @@ void TrackList::paintEvent(QPaintEvent *) {
         }
 
         const QRectF th(row.left() + 8, row.top() + 8, 80, 48);
-        if (t) drawThumb(p, th, t->vid, 12);
+        if (t) { drawThumb(p, th, t->vid, 12); if (!active) drawDlBadge(p, th, t->vid); }
         else if (remoteCards()) drawThumbUrl(p, th, QStringLiteral("pl:") + core->playlistResults[i].url, core->playlistResults[i].thumbUrl, 12);
         else {
             const SavedPlaylist &sp = core->playlists[i];
@@ -598,6 +645,7 @@ void TrackList::paintFeed(QPainter &p) {
         }
         const QRectF th(row.left() + 8, row.top() + 8, 80, 48);
         drawThumb(p, th, t.vid, 12);
+        if (!active) drawDlBadge(p, th, t.vid);
         if (active) {
             p.setPen(Qt::NoPen);
             p.setBrush(QColor(8, 8, 32, 165));

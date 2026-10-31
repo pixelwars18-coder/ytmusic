@@ -70,5 +70,8 @@ private:
     Tab tab = Tab::Results;
     Hit hover;
     QTimer spin;
+    QTimer dwell;            // hovering a song for a moment pre-resolves its stream
+    const Track *trackAt(const Hit &h) const;
+    void drawDlBadge(QPainter &p, const QRectF &thumb, const QString &vid) const;
     QElapsedTimer clock;
 };

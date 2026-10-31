@@ -4,6 +4,9 @@
 #include "tracklist.h"
 #include "paths.h"
 #include "ui_common.h"
+#include "settings.h"
+#include <QDesktopServices>
+#include <QUrl>
 #include <QCloseEvent>
 #include <QDir>
 #include <QDBusConnection>
@@ -190,6 +193,7 @@ QVector<TabsBar::Item> TabsBar::items() const {
     } else if (tab == Tab::Queue) {
         if (!core->queue.isEmpty()) {
             addR(13, QStringLiteral("Clear"), QStringLiteral("trash"));
+            addR(60, QStringLiteral("Download"), QStringLiteral("download"));
             addR(55, QStringLiteral("Remove duplicates"), QStringLiteral("x"));
             addR(50, QStringLiteral("Select"), QStringLiteral("check"));
             addR(18, QStringLiteral("Save as playlist"), QStringLiteral("bookmark"));
@@ -202,6 +206,7 @@ QVector<TabsBar::Item> TabsBar::items() const {
         if (detail) addR(14, QStringLiteral("Save playlist"), QStringLiteral("bookmark"));
         if (tab == Tab::Liked) addR(19, QStringLiteral("Save as playlist"), QStringLiteral("bookmark"));
         if (canSel) { addR(51, QStringLiteral("Delete all"), QStringLiteral("trash")); addR(50, QStringLiteral("Select"), QStringLiteral("check")); }
+        addR(60, QStringLiteral("Download"), QStringLiteral("download"));
         addR(12, QStringLiteral("Queue all"), QStringLiteral("plus"));
         addR(11, QStringLiteral("Shuffle"), QStringLiteral("shuffle"));
         addR(10, QStringLiteral("Play all"), QStringLiteral("play"));
@@ -476,6 +481,10 @@ void MainWindow::mousePressEvent(QMouseEvent *e) {
 
 // ------------------------------------------------------------------ keyboard
 bool MainWindow::eventFilter(QObject *obj, QEvent *ev) {
+    if (ev->type() == QEvent::Polish) {
+        // rounded menus: let the stylesheet's corners show through
+        if (auto *m = qobject_cast<QMenu *>(obj)) m->setAttribute(Qt::WA_TranslucentBackground);
+    }
     if (ev->type() == QEvent::MouseButtonPress && search->edit->hasFocus()) {
         // Clicking anywhere outside the search box gives focus back to the window.
         auto *w = qobject_cast<QWidget *>(obj);
@@ -594,6 +603,7 @@ void MainWindow::applyPalette() {
     pal.setColor(QPalette::Disabled, QPalette::ButtonText, c.onSurfaceVariant);
     pal.setColor(QPalette::Disabled, QPalette::WindowText, c.onSurfaceVariant);
     qApp->setPalette(pal);
+    qApp->setStyleSheet(UI::appStyleSheet());
 }
 
 void MainWindow::showToast(const QString &text) {
@@ -616,6 +626,15 @@ void MainWindow::showTrackMenu(const Track &t, int index, const QPoint &pos) {
     m.addSeparator();
     QAction *aArtist = t.artist.isEmpty() ? nullptr : m.addAction(QStringLiteral("More from %1").arg(t.artist));
     QAction *aCopy = m.addAction(QStringLiteral("Copy link"));
+    m.addSeparator();
+    Downloads *dl = core->downloads;
+    QAction *aDl = nullptr, *aDlCancel = nullptr, *aDlShow = nullptr, *aDlDelete = nullptr;
+    if (dl->isActive(t.vid)) aDlCancel = m.addAction(dl->isRunning(t.vid) ? QStringLiteral("Cancel download (%1%)").arg(qRound(dl->progress(t.vid) * 100))
+                                                                          : QStringLiteral("Cancel download"));
+    else if (!dl->pathFor(t.vid).isEmpty()) {
+        aDlShow = m.addAction(QStringLiteral("Show in folder"));
+        aDlDelete = m.addAction(QStringLiteral("Delete download"));
+    } else aDl = m.addAction(QStringLiteral("Download to this PC"));
     QAction *aRemove = nullptr;
     if (index >= 0 && tab == Tab::Queue) aRemove = m.addAction(QStringLiteral("Remove from queue"));
     else if (index >= 0 && tab == Tab::Saved && !core->savedOpenId.isEmpty()) aRemove = m.addAction(QStringLiteral("Remove from this playlist"));
@@ -628,6 +647,10 @@ void MainWindow::showTrackMenu(const Track &t, int index, const QPoint &pos) {
     else if (r == aPl) addToPlaylistMenu(t);
     else if (r == aLike) core->toggleLike(t);
     else if (aArtist && r == aArtist) { search->edit->setText(t.artist); doSearch(t.artist); }
+    else if (aDl && r == aDl) { dl->add({t}); showToast(QStringLiteral("Downloading “%1”…").arg(t.title)); }
+    else if (aDlCancel && r == aDlCancel) { dl->cancel(t.vid); showToast(QStringLiteral("Download cancelled")); }
+    else if (aDlShow && r == aDlShow) QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(dl->pathFor(t.vid)).absolutePath()));
+    else if (aDlDelete && r == aDlDelete) showToast(dl->remove(t.vid) ? QStringLiteral("Download deleted") : QStringLiteral("Couldn't delete the file"));
     else if (r == aCopy) { QGuiApplication::clipboard()->setText(QStringLiteral("https://www.youtube.com/watch?v=") + t.vid); showToast(QStringLiteral("Link copied")); }
     else if (aRemove && r == aRemove) {
         if (tab == Tab::Queue) core->removeFromQueue(index);
@@ -635,99 +658,10 @@ void MainWindow::showTrackMenu(const Track &t, int index, const QPoint &pos) {
     }
 }
 
-static qint64 dirBytes(const QString &path) {
-    qint64 n = 0;
-    const QFileInfoList fl = QDir(path).entryInfoList(QDir::Files);
-    for (const QFileInfo &fi : fl) n += fi.size();
-    return n;
-}
-
 void MainWindow::openSettings() {
-    QDialog dlg(this);
-    dlg.setWindowTitle(QStringLiteral("Settings"));
-    auto *lay = new QFormLayout(&dlg);
-
-    auto *page = new QComboBox;
-    for (int n : {25, 50, 100}) page->addItem(QStringLiteral("%1 songs").arg(n), n);
-    page->setCurrentIndex(qMax(0, page->findData(core->pageSize)));
-    lay->addRow(QStringLiteral("Results per search"), page);
-
-    auto *quality = new QComboBox;
-    quality->addItem(QStringLiteral("Best available"), 0);
-    quality->addItem(QStringLiteral("Balanced (up to 128 kbps)"), 1);
-    quality->addItem(QStringLiteral("Data saver (up to 64 kbps)"), 2);
-    quality->setCurrentIndex(core->audioQuality);
-    lay->addRow(QStringLiteral("Audio quality"), quality);
-
-    auto *memory = new QComboBox;
-    memory->addItem(QStringLiteral("Free quickly (30 s idle)"), 0);
-    memory->addItem(QStringLiteral("Normal (2 min idle)"), 1);
-    memory->addItem(QStringLiteral("Never (instant resume)"), 2);
-    memory->setCurrentIndex(core->memoryMode);
-    lay->addRow(QStringLiteral("Release player memory"), memory);
-
-    auto *hidden = new QCheckBox(QStringLiteral("Start hidden in the tray"));
-    hidden->setChecked(core->startHidden);
-    lay->addRow(hidden);
-    auto *tray = new QCheckBox(QStringLiteral("Close button hides to the tray (off: quits)"));
-    tray->setChecked(core->closeToTray);
-    lay->addRow(tray);
-
-    auto *sep = new QFrame; sep->setFrameShape(QFrame::HLine);
-    lay->addRow(sep);
-
-    auto *btnSearch = new QPushButton(QStringLiteral("Clear recent searches"));
-    auto *btnPlays = new QPushButton(QStringLiteral("Clear play history && For you"));
-    auto *btnThumbs = new QPushButton;
-    const QString thumbDir = Paths::cacheDir() + QStringLiteral("/thumbs");
-    auto thumbLabel = [thumbDir] { return QStringLiteral("Clear picture cache (%1 MB)").arg(dirBytes(thumbDir) / 1048576.0, 0, 'f', 1); };
-    btnThumbs->setText(thumbLabel());
-    lay->addRow(btnSearch);
-    lay->addRow(btnPlays);
-    lay->addRow(btnThumbs);
-    connect(btnSearch, &QPushButton::clicked, &dlg, [this, btnSearch] { core->clearHistory(); btnSearch->setEnabled(false); });
-    connect(btnPlays, &QPushButton::clicked, &dlg, [this, btnPlays] {
-        if (QMessageBox::question(this, QStringLiteral("Clear play history"), QStringLiteral("Clear your recently played list and the For you shelves?")) != QMessageBox::Yes) return;
-        core->clearRecentPlays();
-        btnPlays->setEnabled(false);
-    });
-    connect(btnThumbs, &QPushButton::clicked, &dlg, [thumbDir, btnThumbs, thumbLabel] {
-        const QFileInfoList fl = QDir(thumbDir).entryInfoList(QDir::Files);
-        for (const QFileInfo &fi : fl) QFile::remove(fi.filePath());
-        btnThumbs->setText(thumbLabel());
-    });
-
-    auto *btnExport = new QPushButton(QStringLiteral("Export library…"));
-    auto *btnImport = new QPushButton(QStringLiteral("Restore from file…"));
-    lay->addRow(btnExport);
-    lay->addRow(btnImport);
-    connect(btnExport, &QPushButton::clicked, &dlg, [this] {
-        const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Export library"), QDir::homePath() + QStringLiteral("/ytmusic-backup.json"), QStringLiteral("JSON (*.json)"));
-        if (path.isEmpty()) return;
-        const QString err = core->exportBackup(path);
-        showToast(err.isEmpty() ? QStringLiteral("Library exported") : QStringLiteral("Export failed: ") + err);
-    });
-    connect(btnImport, &QPushButton::clicked, &dlg, [this] {
-        const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Restore from file"), QDir::homePath(), QStringLiteral("JSON (*.json)"));
-        if (path.isEmpty()) return;
-        bool ok = false;
-        showToast(core->importBackup(path, &ok));
-    });
-
-    auto *about = new QLabel(QStringLiteral("Likes, playlists and history are stored in\n%1").arg(Paths::stateDir()));
-    about->setEnabled(false);
-    lay->addRow(about);
-
-    auto *bb = new QDialogButtonBox(QDialogButtonBox::Close);
-    connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::accept);
-    lay->addRow(bb);
-
+    SettingsDialog dlg(core, this);
+    connect(&dlg, &SettingsDialog::toast, this, &MainWindow::showToast);
     dlg.exec();
-    core->setPageSize(page->currentData().toInt());
-    core->setStartHidden(hidden->isChecked());
-    core->setCloseToTray(tray->isChecked());
-    core->setAudioQuality(quality->currentData().toInt());
-    core->setMemoryMode(memory->currentData().toInt());
 }
 
 // Two separate confirmations; the second spells out that it can't be undone.
@@ -845,6 +779,12 @@ void MainWindow::onAction(int id) {
         break;
     }
     case 40: core->refreshFeed(); break;
+    case 60: {
+        const int n = core->downloads->add(core->list(t));
+        showToast(n ? QStringLiteral("Downloading %1 song%2 to %3").arg(n).arg(n == 1 ? "" : "s").arg(QDir(core->downloads->dir).dirName())
+                    : QStringLiteral("Already downloaded"));
+        break;
+    }
     case 20: core->setSearchMode(Core::SearchMode::Songs); break;
     case 21: core->setSearchMode(Core::SearchMode::Playlists); break;
     case 30:

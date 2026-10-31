@@ -1,5 +1,6 @@
 #pragma once
 #include "types.h"
+#include "downloads.h"
 #include <QDateTime>
 #include <QElapsedTimer>
 #include <QHash>
@@ -82,6 +83,8 @@ public:
         }
     }
     QString sleepLabel() const;
+    Downloads *downloads = nullptr;           // songs saved to this PC
+    void prefetch(const QString &vid);     // resolve a stream URL ahead of a likely click (hover, top result)
     bool mpvConnected() const { return fd >= 0; }
 
 public slots:
@@ -147,6 +150,9 @@ public slots:
     void setCloseToTray(bool on);
     void setAudioQuality(int q);
     void setMemoryMode(int m);
+    void setDownloadDir(const QString &d);
+    void setDownloadFormat(int f);
+    void setDownloadTags(bool on);
     void shutdown();
 
 signals:
@@ -177,11 +183,18 @@ private:
     void rebuildLikedSet();
     int pickNext(bool automatic);
     void preloadNext();
-    void resolveUrl(const QString &vid);
+    void resolveUrl(const QString &vid, bool speculative = false);
+    void loadUrl(const QString &url);
+    void streamTrack(const Track &t);
     void loadTrack(const Track &t);
     void loadResolved(const QString &vid);
     void trackFailed();
     void checkSleep();
+    void loadUrlCache();
+    void saveUrlCache();
+    static qint64 urlExpiry(const QString &url);
+    QTimer urlSaveTimer;
+    int speculative = 0;     // hover / top-result resolves in flight
 
     QProcess *mpvProc = nullptr;
     int fd = -1; // mpv JSON IPC (plain AF_UNIX socket: avoids linking QtNetwork)
@@ -203,11 +216,13 @@ private:
     QSet<QString> likedSet;
 
     // preloading
-    struct Resolved { QString url; QDateTime when; };
+    struct Resolved { QString url; QDateTime when; qint64 expires = 0; };  // expires: epoch secs from the URL
+    bool fresh(const QString &vid) const;
     QHash<QString, Resolved> urlCache;
     QHash<QString, QProcess *> resolving;
     int nextPick = -1;       // pre-chosen next index (needed for shuffle)
     bool usedDirect = false; // current track was loaded from a resolved URL
+    bool usedLocal = false;  // current track is a downloaded file
     bool retried = false;
     QString waitingVid;      // track whose URL we are resolving right now
     bool loaded = false;
