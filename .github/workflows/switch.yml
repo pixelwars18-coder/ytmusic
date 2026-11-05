@@ -27,11 +27,20 @@ jobs:
         shell: bash
         working-directory: ytmusic-switch
         run: |
-          (apt-get update -qq && apt-get install -y -qq g++ pkg-config libcurl4-openssl-dev libavformat-dev libavcodec-dev libswresample-dev libavutil-dev libsdl2-dev) > /tmp/apt.log 2>&1 || tail -20 /tmp/apt.log
+          (apt-get update -qq && apt-get install -y -qq g++ pkg-config libcurl4-openssl-dev libavformat-dev libavcodec-dev libswresample-dev libavutil-dev libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev fonts-dejavu-core) > /tmp/apt.log 2>&1 || tail -20 /tmp/apt.log
           set -o pipefail
           { g++ -std=gnu++20 -O1 -o /tmp/host_test tests/host_test.cpp source/yt.cpp source/net.cpp source/player.cpp source/downloads.cpp source/common.cpp \
               $(pkg-config --cflags --libs libcurl libavformat libavcodec libswresample libavutil sdl2) -lpthread \
             && cd /tmp && SDL_AUDIODRIVER=disk SDL_DISKAUDIODELAY=40 timeout 300 /tmp/host_test; } 2>&1 | tee /tmp/host.log
+      - name: UI screenshots (Linux)
+        if: always()
+        shell: bash
+        working-directory: ytmusic-switch
+        run: |
+          mkdir -p /tmp/shots
+          { g++ -std=gnu++20 -O1 -o /tmp/host_ui tests/host_ui.cpp $(ls source/*.cpp | grep -v main.cpp) \
+              $(pkg-config --cflags --libs libcurl libavformat libavcodec libswresample libavutil sdl2 SDL2_ttf SDL2_image) -lpthread \
+            && cd /tmp/shots && SDL_AUDIODRIVER=disk SDL_DISKAUDIODELAY=40 timeout 120 /tmp/host_ui; } 2>&1 | tee /tmp/ui.log
       - name: Publish result
         if: always()
         shell: bash
@@ -42,6 +51,8 @@ jobs:
           cp /tmp/build.log build.log 2>/dev/null || echo "no build log" > build.log
           cp /tmp/pkgs.txt pkgs.txt 2>/dev/null || true
           cp /tmp/host.log host.log 2>/dev/null || true
+          cp /tmp/ui.log ui.log 2>/dev/null || true
+          cp /tmp/shots/*.png . 2>/dev/null || true
           cp /tmp/ytmusic-data/log.txt host-applog.txt 2>/dev/null || true
           cp $GITHUB_WORKSPACE/ytmusic-switch/*.nro . 2>/dev/null || true
           echo "${sha} ${{ job.status }}" > status.txt

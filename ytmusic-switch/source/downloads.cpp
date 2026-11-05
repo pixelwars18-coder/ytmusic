@@ -125,13 +125,13 @@ void Downloads::worker() {
         running.clear();
         if (ok) ++okCount;
         else if (!cancelCur) ++failCount;
-        if (queue.empty() && okCount + failCount > 0) {
+        if (queue.empty() && okCount > 0) {
             char b[160];
             if (okCount == 1 && failCount == 0) snprintf(b, sizeof b, "Downloaded \"%.100s\"", t.title.c_str());
             else snprintf(b, sizeof b, "Downloaded %d song%s%s", okCount, okCount == 1 ? "" : "s", failCount ? " (some failed)" : "");
             msgs.push_back(b);
             okCount = failCount = 0;
-        }
+        } else if (queue.empty()) failCount = 0;
     }
 }
 

@@ -80,7 +80,7 @@ int main() {
 
     Downloads d;
     d.start();
-    Track tr = pg.tracks.size() > 1 ? pg.tracks[1] : Track{vid, "t", "a", 0};
+    Track tr = pg.tracks.empty() ? Track{vid, "t", "a", 0} : pg.tracks[0];   // CI IPs get bot checks on some videos
     d.add({tr});
     t0 = std::chrono::steady_clock::now();
     while (d.pending() > 0 && ms() < 90000) std::this_thread::sleep_for(200ms);
