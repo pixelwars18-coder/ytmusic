@@ -31,7 +31,7 @@ int main(int argc, char **argv) {
         const int frames = int(secs * 30);
         for (int i = 0; i < frames; ++i) {
             Input x = in;
-            if (i > 0) x.down = 0;
+            if (i > 0) x.down = x.held = 0;
             x.dt = 1 / 30.f;
             app.frame(x);
             app.render();
@@ -46,7 +46,7 @@ int main(int argc, char **argv) {
     run(0.2f, a);
     run(5);
     shot(r, surf, "ui-search-playing.png");
-    Input right; right.down = B_RIGHT;
+    Input right; right.down = right.held = B_RIGHT;
     run(0.1f, right); run(0.1f, right);
     run(0.5f);
     shot(r, surf, "ui-tiles.png");

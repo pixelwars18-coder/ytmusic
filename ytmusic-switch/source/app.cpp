@@ -795,6 +795,10 @@ void App::drawTabs() {
         const bool current = int(view) == i;
         g.fillCircle(cx, cy, kTabBtn / 2, current ? t.accent : t.panelHi);
         g.icon(kViewIcons[i], cx, cy, 28, current ? t.onAccent : t.text);
+        if (focus == 1 && i == tabSel) {
+            g.rainbowRing(cx - kTabBtn / 2 - 6, cy - kTabBtn / 2 - 6, kTabBtn + 12, kTabBtn + 12, kTabBtn / 2 + 6, 4, clock);
+            g.text(kViewNames[i], cx, kTabY + kTabH + 10, 17, t.accent, 0, Align::Center, true);
+        }
         std::string count;
         if (i == int(View::Queue) && !lib.queue.empty()) count = std::to_string(lib.queue.size());
         if (i == int(View::Downloads) && dl.pending()) count = std::to_string(dl.pending());
@@ -802,10 +806,6 @@ void App::drawTabs() {
             const float bw = float(std::max(22, g.measure(count, 12, true) + 12));
             g.fillRound(cx + 16, cy - 36, bw, 22, 11, t.danger);
             g.text(count, cx + 16 + bw / 2, cy - 33, 12, SDL_Color{255, 255, 255, 255}, 0, Align::Center, true);
-        }
-        if (focus == 1 && i == tabSel) {
-            g.rainbowRing(cx - kTabBtn / 2 - 6, cy - kTabBtn / 2 - 6, kTabBtn + 12, kTabBtn + 12, kTabBtn / 2 + 6, 4, clock);
-            g.text(kViewNames[i], cx, kTabY + kTabH + 10, 17, t.accent, 0, Align::Center, true);
         }
     }
 }
@@ -845,7 +845,7 @@ void App::drawHints() {
     };
     if (!menu.empty()) { hint("B", "Close"); hint("A", "OK"); return; }
     if (focus == 1) { hint("B", "Back"); hint("A", "Open"); hint("Y", "Search"); return; }
-    hint("+", st == Player::Playing ? "Pause" : "Play");
+    hint("+", st == Player::Playing ? "Pause" : "Resume");
     hint("Y", "Search");
     hint("\xE2\x88\x92", "Options");
     auto rs = rows();
