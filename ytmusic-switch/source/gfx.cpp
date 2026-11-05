@@ -7,14 +7,12 @@
 
 static SDL_Vertex vtx(float x, float y, SDL_Color c) { return SDL_Vertex{{x, y}, c, {0, 0}}; }
 
-bool Gfx::init(SDL_Renderer *rr, const void *fd, size_t fs, const void *ed, size_t es) {
+bool Gfx::init(SDL_Renderer *rr, const std::vector<FontBlob> &f) {
     r = rr;
-    fontData = fd;
-    fontSize = fs;
-    extData = ed;
-    extSize = es;
+    blobs = f;
+    if (blobs.empty()) return false;
     SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-    return font(16, false) != nullptr;
+    return font(16, false, 0) != nullptr;
 }
 
 void Gfx::shutdown() {
@@ -24,11 +22,12 @@ void Gfx::shutdown() {
     fonts.clear();
 }
 
-TTF_Font *Gfx::font(int size, bool bold) {
-    auto key = std::make_pair(size, bold);
+TTF_Font *Gfx::font(int size, bool bold, int which) {
+    if (which < 0 || which >= int(blobs.size())) which = 0;
+    auto key = std::make_tuple(size, bold, which);
     auto it = fonts.find(key);
     if (it != fonts.end()) return it->second;
-    TTF_Font *f = TTF_OpenFontRW(SDL_RWFromConstMem(fontData, int(fontSize)), 1, size);
+    TTF_Font *f = blobs[size_t(which)].data ? TTF_OpenFontRW(SDL_RWFromConstMem(blobs[size_t(which)].data, int(blobs[size_t(which)].size)), 1, size) : nullptr;
     if (f && bold) TTF_SetFontStyle(f, TTF_STYLE_BOLD);
     if (f) TTF_SetFontHinting(f, TTF_HINTING_LIGHT);
     fonts[key] = f;
@@ -103,19 +102,76 @@ static std::string elide(TTF_Font *f, const std::string &s, int maxW) {
     return "\xE2\x80\xA6";
 }
 
-int Gfx::measure(const std::string &s, int size, bool bold) {
-    int w = 0;
-    if (TTF_Font *f = font(size, bold)) TTF_SizeUTF8(f, s.c_str(), &w, nullptr);
+static std::vector<uint32_t> decodeUtf8(const std::string &s) {
+    std::vector<uint32_t> out;
+    for (size_t i = 0; i < s.size();) {
+        const unsigned char c = static_cast<unsigned char>(s[i]);
+        uint32_t cp;
+        int n;
+        if (c < 0x80) { cp = c; n = 1; }
+        else if ((c >> 5) == 6) { cp = c & 0x1f; n = 2; }
+        else if ((c >> 4) == 14) { cp = c & 0x0f; n = 3; }
+        else if ((c >> 3) == 30) { cp = c & 0x07; n = 4; }
+        else { ++i; continue; }
+        if (i + size_t(n) > s.size()) break;
+        for (int k = 1; k < n; ++k) cp = (cp << 6) | (static_cast<unsigned char>(s[i + size_t(k)]) & 0x3f);
+        out.push_back(cp);
+        i += size_t(n);
+    }
+    return out;
+}
+
+static void encodeUtf8(uint32_t cp, std::string &o) {
+    if (cp < 0x80) o += char(cp);
+    else if (cp < 0x800) { o += char(0xC0 | (cp >> 6)); o += char(0x80 | (cp & 0x3f)); }
+    else if (cp < 0x10000) { o += char(0xE0 | (cp >> 12)); o += char(0x80 | ((cp >> 6) & 0x3f)); o += char(0x80 | (cp & 0x3f)); }
+    else { o += char(0xF0 | (cp >> 18)); o += char(0x80 | ((cp >> 12) & 0x3f)); o += char(0x80 | ((cp >> 6) & 0x3f)); o += char(0x80 | (cp & 0x3f)); }
+}
+
+// Picks the font that can show the most of `s` (the Switch has separate Japanese/Chinese/Korean system fonts)
+// and drops characters none of them have (emoji), instead of drawing boxes.
+std::string Gfx::pickFont(const std::string &s, int size, bool bold, int &which) {
+    which = 0;
+    bool ascii = true;
+    for (unsigned char c : s) if (c >= 0x80) { ascii = false; break; }
+    if (ascii) return s;
+    const auto cps = decodeUtf8(s);
+    int best = -1, bestIdx = 0;
+    for (int i = 0; i < int(blobs.size()); ++i) {
+        TTF_Font *f = font(size, bold, i);
+        if (!f) continue;
+        int have = 0;
+        for (uint32_t cp : cps) have += (cp < 0x80 || TTF_GlyphIsProvided32(f, cp)) ? 1 : 0;
+        if (have > best) { best = have; bestIdx = i; }
+        if (have == int(cps.size())) break;
+    }
+    which = bestIdx;
+    if (best == int(cps.size())) return s;
+    TTF_Font *f = font(size, bold, which);
+    std::string out;
+    for (uint32_t cp : cps) if (cp < 0x80 || TTF_GlyphIsProvided32(f, cp)) encodeUtf8(cp, out);
+    std::string trimmed;   // collapse doubled spaces left behind by removed emoji
+    for (char ch : out) if (!(ch == ' ' && !trimmed.empty() && trimmed.back() == ' ')) trimmed += ch;
+    while (!trimmed.empty() && trimmed.back() == ' ') trimmed.pop_back();
+    return trimmed;
+}
+
+int Gfx::measure(const std::string &s0, int size, bool bold) {
+    int w = 0, which = 0;
+    const std::string s = pickFont(s0, size, bold, which);
+    if (TTF_Font *f = font(size, bold, which)) TTF_SizeUTF8(f, s.c_str(), &w, nullptr);
     return w;
 }
 
 int Gfx::text(const std::string &s0, float x, float y, int size, SDL_Color c, int maxW, Align a, bool bold) {
     if (s0.empty()) return 0;
-    TTF_Font *f = font(size, bold);
-    if (!f) return 0;
-    std::string s = maxW > 0 ? elide(f, s0, maxW) : s0;
+    int which = 0;
+    const std::string s1 = pickFont(s0, size, bold, which);
+    TTF_Font *f = font(size, bold, which);
+    if (!f || s1.empty()) return 0;
+    std::string s = maxW > 0 ? elide(f, s1, maxW) : s1;
     char key[64];
-    snprintf(key, sizeof key, "|%d|%d|%02x%02x%02x", size, int(bold), c.r, c.g, c.b);
+    snprintf(key, sizeof key, "|%d|%d|%d|%02x%02x%02x", size, int(bold), which, c.r, c.g, c.b);
     const std::string k = s + key;
     auto it = cache.find(k);
     if (it == cache.end()) {

@@ -27,7 +27,7 @@ struct Input {
 
 class App {
 public:
-    bool init(SDL_Renderer *r, const void *font, size_t fontSize);
+    bool init(SDL_Renderer *r, const std::vector<Gfx::FontBlob> &fonts);
     bool frame(const Input &in);   // false: quit
     void render();
     void shutdown();
@@ -116,7 +116,7 @@ private:
     // ui
     std::vector<MenuItem> menu;
     std::string menuTitle;
-    int menuSel = 0;
+    int menuSel = 0, menuTop = 0;
     std::string toastText;
     float toastT = 0;
     float repeatT = 0;

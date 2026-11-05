@@ -138,7 +138,7 @@ std::string Library::importBackup(const std::string &path, bool *ok) {
     for (auto &p : o.value("playlists", json::array())) {
         const std::string id = p.value("id", std::string());
         auto tr = tracksFrom(p.value("tracks", json::array()));
-        if (Playlist *have = find(id)) nTr += addToPlaylist(id, tr);
+        if (find(id)) nTr += addToPlaylist(id, tr);
         else {
             char gen[32];
             snprintf(gen, sizeof gen, "im%llx%zu", (unsigned long long)nowSecs(), playlists.size());

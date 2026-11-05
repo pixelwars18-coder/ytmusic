@@ -6,6 +6,7 @@
 #include <deque>
 #include <list>
 #include <map>
+#include <tuple>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -24,7 +25,9 @@ enum class Align { Left, Center, Right };
 
 class Gfx {
 public:
-    bool init(SDL_Renderer *r, const void *fontData, size_t fontSize, const void *extFontData = nullptr, size_t extFontSize = 0);
+    struct FontBlob { const void *data; size_t size; };
+    // first font is the main one; the rest are fallbacks (CJK, Korean, ...) used for text the main one can't show
+    bool init(SDL_Renderer *r, const std::vector<FontBlob> &fonts);
     void shutdown();
     SDL_Renderer *r = nullptr;
 
@@ -44,14 +47,12 @@ public:
     int badge(const std::string &label, float x, float y, SDL_Color bg = Col::outline, SDL_Color fg = Col::onSurface);
 
 private:
-    TTF_Font *font(int size, bool bold);
+    TTF_Font *font(int size, bool bold, int which = 0);
+    std::string pickFont(const std::string &s, int size, bool bold, int &which);
     struct Cached { SDL_Texture *tex; int w, h; unsigned frame; };
     std::unordered_map<std::string, Cached> cache;
-    std::map<std::pair<int, bool>, TTF_Font *> fonts;
-    const void *fontData = nullptr;
-    size_t fontSize = 0;
-    const void *extData = nullptr;
-    size_t extSize = 0;
+    std::map<std::tuple<int, bool, int>, TTF_Font *> fonts;
+    std::vector<FontBlob> blobs;
     unsigned frameNo = 0;
     SDL_Texture *maskTex = nullptr;
 };

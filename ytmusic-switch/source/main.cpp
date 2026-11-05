@@ -21,8 +21,13 @@ static bool showKeyboard(const std::string &guide, const std::string &initial, s
 int main(int, char **) {
     socketInitializeDefault();
     plInitialize(PlServiceType_User);
-    PlFontData font{};
-    plGetSharedFontByType(&font, PlSharedFontType_Standard);
+    // system fonts: Latin/Japanese first, then Chinese, Korean and Nintendo's symbols as fallbacks
+    std::vector<Gfx::FontBlob> fonts;
+    for (PlSharedFontType t : {PlSharedFontType_Standard, PlSharedFontType_ChineseSimplified, PlSharedFontType_ExtChineseSimplified,
+                               PlSharedFontType_ChineseTraditional, PlSharedFontType_KO, PlSharedFontType_NintendoExt}) {
+        PlFontData fd{};
+        if (R_SUCCEEDED(plGetSharedFontByType(&fd, t)) && fd.address) fonts.push_back({fd.address, fd.size});
+    }
 
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO);
     TTF_Init();
@@ -39,7 +44,7 @@ int main(int, char **) {
 
     App app;
     app.keyboard = showKeyboard;
-    if (!app.init(ren, font.address, font.size)) {
+    if (!app.init(ren, fonts)) {
         logf("init failed");
     } else {
         Uint64 last = SDL_GetPerformanceCounter();

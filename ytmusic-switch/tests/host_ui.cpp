@@ -25,7 +25,7 @@ int main(int argc, char **argv) {
     SDL_Renderer *r = SDL_CreateSoftwareRenderer(surf);
     App app;
     app.keyboard = [](const std::string &, const std::string &, std::string &out) { out = "test"; return true; };
-    if (!app.init(r, font.data(), font.size())) { printf("init failed\n"); return 1; }
+    if (!app.init(r, {{font.data(), font.size()}})) { printf("init failed\n"); return 1; }
     auto run = [&](float secs, Input in = {}) {
         const int frames = int(secs * 30);
         for (int i = 0; i < frames; ++i) {

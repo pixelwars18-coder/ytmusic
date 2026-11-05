@@ -8,14 +8,15 @@ constexpr float W = 1280, H = 720;
 constexpr float kSideW = 252, kCX = 276, kCW = W - kCX - 24;
 constexpr float kListY = 116, kRowH = 80, kBarY = 610, kBarH = 94;
 constexpr float kListH = kBarY - 14 - kListY;
+constexpr int kMenuVisible = 10;
 const char *kViewNames[] = {"Search", "Queue", "Liked", "Playlists", "Downloads", "Settings"};
 const char *kViewIcons[] = {"search", "queue", "heart", "list", "download", "gear"};
 std::mt19937 &rng() { static std::mt19937 r{std::random_device{}()}; return r; }
 bool fresh(const YT::Stream &s) { return s.ok() && (s.expires == 0 || s.expires - nowSecs() > 600); }
 }
 
-bool App::init(SDL_Renderer *r, const void *font, size_t fontSize) {
-    if (!g.init(r, font, fontSize)) return false;
+bool App::init(SDL_Renderer *r, const std::vector<Gfx::FontBlob> &fonts) {
+    if (!g.init(r, fonts)) return false;
     thumbs.start(r);
     mkdirs(Paths::root());
     lib.load();
@@ -299,11 +300,12 @@ void App::openAddToPlaylist(const std::vector<Track> &tracks) {
         }});
     }
     menuSel = 0;
+    menuTop = 0;
 }
 
 void App::openMenu(const Row *r) {
     menu.clear();
-    menuSel = 0;
+    menuSel = menuTop = 0;
     const std::vector<Track> *list = currentTracks();
     if (r && r->kind == Row::Song) {
         const Track t = r->t;
@@ -442,19 +444,22 @@ bool App::frame(const Input &in) {
     if (!menu.empty()) {
         if (in.down & (B_B | B_MINUS)) { menu.clear(); return !quitting; }
         if (in.down & B_UP || (in.down & B_DOWN)) menuSel = std::clamp(menuSel + ((in.down & B_DOWN) ? 1 : -1), 0, int(menu.size()) - 1);
-        float mh = 64 + menu.size() * 52.f;
-        if (mh > H - 80) mh = H - 80;
+        const int vis = std::min(int(menu.size()), kMenuVisible);
+        if (menuSel < menuTop) menuTop = menuSel;
+        if (menuSel >= menuTop + vis) menuTop = menuSel - vis + 1;
+        const float mh = 64 + vis * 52.f;
         const float mx = (W - 560) / 2, my = (H - mh) / 2;
         bool fire = (in.down & B_A) != 0;
         if (in.touching && !touchWas) {
-            const int i = int((in.ty - my - 60) / 52);
-            if (in.tx >= mx && in.tx <= mx + 560 && i >= 0 && i < int(menu.size())) { menuSel = i; fire = true; }
+            const int i = menuTop + int((in.ty - my - 60) / 52);
+            if (in.tx >= mx && in.tx <= mx + 560 && in.ty > my + 60 && i >= 0 && i < int(menu.size())) { menuSel = i; fire = true; }
             else if (in.tx < mx || in.tx > mx + 560 || in.ty < my || in.ty > my + mh) menu.clear();
         }
         touchWas = in.touching;
         if (fire && menuSel < int(menu.size())) {
             auto fn = menu[size_t(menuSel)].fn;
             menu.clear();
+            menuTop = 0;
             fn();   // may open a new menu (add to playlist)
         }
         return !quitting;
@@ -727,8 +732,8 @@ void App::drawPlayerBar() {
         if (SDL_Texture *tx = thumbs.get(t->vid)) g.image(tx, x + 14, y + 14, 66, 66, 14);
         else g.icon("music", x + 47, y + 47, 24, Col::outline);
     } else g.icon("music", x + 47, y + 47, 24, Col::outline);
-    const float tw = 300;
     const Player::State st = player.state();
+    const float tw = (W / 2 + 40 - 72 - 30) - (x + 94);   // up to the transport buttons
     g.text(t ? t->title : "Nothing playing", x + 94, y + 18, 18, Col::onSurface, int(tw), Align::Left, true);
     std::string sub = t ? t->artist : "Pick a song and press A";
     if (loadingTrack || st == Player::Loading) sub = "Loading\xE2\x80\xA6";
@@ -773,18 +778,22 @@ void App::drawPlayerBar() {
 void App::drawMenu() {
     if (menu.empty()) return;
     g.fillRect(0, 0, W, H, SDL_Color{3, 3, 16, 170});
-    float mh = 64 + menu.size() * 52.f;
-    if (mh > H - 80) mh = H - 80;
+    const int vis = std::min(int(menu.size()), kMenuVisible);
+    const float mh = 64 + vis * 52.f;
     const float mx = (W - 560) / 2, my = (H - mh) / 2;
     g.fillRound(mx, my, 560, mh, 24, Col::surfaceVariant);
     g.strokeRound(mx, my, 560, mh, 24, 1, Col::outline);
     g.text(menuTitle, mx + 28, my + 20, 18, Col::secondary, 500, Align::Left, true);
-    for (size_t i = 0; i < menu.size(); ++i) {
-        const float iy = my + 60 + i * 52;
-        if (iy + 52 > my + mh) break;
-        const bool on = int(i) == menuSel;
+    if (int(menu.size()) > vis) {   // scroll hint
+        g.text(std::to_string(menuSel + 1) + "/" + std::to_string(menu.size()), mx + 532, my + 22, 14, Col::onSurfaceVariant, 0, Align::Right);
+        const float bh = vis * 52.f * vis / menu.size(), by = my + 60 + (vis * 52.f - bh) * menuTop / float(menu.size() - vis);
+        g.fillRound(mx + 550, by, 4, bh, 2, Col::outline);
+    }
+    for (int i = menuTop; i < menuTop + vis; ++i) {
+        const float iy = my + 60 + (i - menuTop) * 52;
+        const bool on = i == menuSel;
         if (on) g.fillRound(mx + 12, iy, 536, 48, 14, Col::outline);
-        g.text(menu[i].label, mx + 30, iy + 13, 19, menu[i].danger ? Col::error : Col::onSurface, 480, Align::Left, on);
+        g.text(menu[size_t(i)].label, mx + 30, iy + 13, 19, menu[size_t(i)].danger ? Col::error : Col::onSurface, 480, Align::Left, on);
     }
 }
 
