@@ -25,6 +25,7 @@ int main(int argc, char **argv) {
     SDL_Renderer *r = SDL_CreateSoftwareRenderer(surf);
     App app;
     app.keyboard = [](const std::string &, const std::string &, std::string &out) { out = "test"; return true; };
+    app.battery = [] { return 82; };
     if (!app.init(r, {{font.data(), font.size()}})) { printf("init failed\n"); return 1; }
     auto run = [&](float secs, Input in = {}) {
         const int frames = int(secs * 30);
@@ -45,8 +46,10 @@ int main(int argc, char **argv) {
     run(0.2f, a);
     run(5);
     shot(r, surf, "ui-search-playing.png");
-    Input down; down.down = B_DOWN;
-    run(0.1f, down); run(0.1f, down);
+    Input right; right.down = B_RIGHT;
+    run(0.1f, right); run(0.1f, right);
+    run(0.5f);
+    shot(r, surf, "ui-tiles.png");
     Input minus; minus.down = B_MINUS;     // context menu
     run(0.3f, minus);
     shot(r, surf, "ui-menu.png");
@@ -59,9 +62,19 @@ int main(int argc, char **argv) {
     run(5);
     printf("app play path: state=%d pos=%.1f (2 = Playing)\n", app.testState(), app.testPos());
     shot(r, surf, "ui-playing.png");
+    app.testView(2);                       // focus on the section buttons
+    app.testFocusTabs();
+    run(0.5f);
+    shot(r, surf, "ui-tabs.png");
     app.testView(5);                       // settings
+    Input a2; a2.down = B_A;
     run(0.3f);
     shot(r, surf, "ui-settings.png");
+    setDarkTheme(false);
+    app.testView(1);
+    run(0.5f);
+    shot(r, surf, "ui-light.png");
+    setDarkTheme(true);
     app.shutdown();
     return 0;
 }

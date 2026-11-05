@@ -20,6 +20,7 @@ static bool showKeyboard(const std::string &guide, const std::string &initial, s
 
 int main(int, char **) {
     socketInitializeDefault();
+    psmInitialize();
     plInitialize(PlServiceType_User);
     // system fonts: Latin/Japanese first, then Chinese, Korean and Nintendo's symbols as fallbacks
     std::vector<Gfx::FontBlob> fonts;
@@ -44,6 +45,10 @@ int main(int, char **) {
 
     App app;
     app.keyboard = showKeyboard;
+    app.battery = [] {
+        u32 p = 0;
+        return R_SUCCEEDED(psmGetBatteryChargePercentage(&p)) ? int(p) : -1;
+    };
     if (!app.init(ren, fonts)) {
         logf("init failed");
     } else {
@@ -102,6 +107,7 @@ int main(int, char **) {
     TTF_Quit();
     SDL_Quit();
     plExit();
+    psmExit();
     socketExit();
     return 0;
 }

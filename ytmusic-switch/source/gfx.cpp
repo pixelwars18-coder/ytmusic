@@ -7,6 +7,33 @@
 
 static SDL_Vertex vtx(float x, float y, SDL_Color c) { return SDL_Vertex{{x, y}, c, {0, 0}}; }
 
+static const Theme kDark{{0x26, 0x27, 0x2b, 255}, {0x34, 0x35, 0x3a, 255}, {0x43, 0x44, 0x4a, 255}, {0xff, 0xff, 0xff, 255},
+                         {0xa8, 0xaa, 0xb0, 255}, {0x4a, 0x4b, 0x52, 255}, {0x2d, 0xc8, 0xf0, 255}, {0x0b, 0x1e, 0x26, 255},
+                         {0x00, 0x00, 0x00, 170}, {0xff, 0x5a, 0x5f, 255}};
+static const Theme kLight{{0xeb, 0xeb, 0xed, 255}, {0xff, 0xff, 0xff, 255}, {0xf3, 0xf3, 0xf5, 255}, {0x2d, 0x2d, 0x30, 255},
+                          {0x70, 0x71, 0x78, 255}, {0xcf, 0xd0, 0xd5, 255}, {0x00, 0x8f, 0xd6, 255}, {0xff, 0xff, 0xff, 255},
+                          {0x20, 0x20, 0x28, 120}, {0xe0, 0x30, 0x3a, 255}};
+static bool gDark = true;
+const Theme &TH() { return gDark ? kDark : kLight; }
+void setDarkTheme(bool d) { gDark = d; }
+bool darkTheme() { return gDark; }
+
+static SDL_Color hsv(float h, float s, float v, Uint8 a = 255) {
+    h = std::fmod(h, 1.f);
+    if (h < 0) h += 1;
+    const float i = std::floor(h * 6), f = h * 6 - i, p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+    float r, g, b;
+    switch (int(i) % 6) {
+    case 0: r = v; g = t; b = p; break;
+    case 1: r = q; g = v; b = p; break;
+    case 2: r = p; g = v; b = t; break;
+    case 3: r = p; g = q; b = v; break;
+    case 4: r = t; g = p; b = v; break;
+    default: r = v; g = p; b = q; break;
+    }
+    return SDL_Color{Uint8(r * 255), Uint8(g * 255), Uint8(b * 255), a};
+}
+
 bool Gfx::init(SDL_Renderer *rr, const std::vector<FontBlob> &f) {
     r = rr;
     blobs = f;
@@ -83,6 +110,40 @@ void Gfx::strokeRound(float x, float y, float w, float h, float rad, float t, SD
 }
 
 void Gfx::fillCircle(float cx, float cy, float rad, SDL_Color c) { fillRound(cx - rad, cy - rad, rad * 2, rad * 2, rad, c); }
+
+// Ring around a rounded rect whose colour runs through the spectrum along the outline and slowly rotates.
+void Gfx::rainbowRing(float x, float y, float w, float h, float rad, float t, float phase) {
+    rad = std::min({rad, w / 2, h / 2});
+    const float pulse = 0.5f + 0.5f * std::sin(phase * 3.2f);
+    const float outR = rad + t, inR = rad;
+    std::vector<SDL_Vertex> v;
+    std::vector<int> idx;
+    const float cx[4] = {x + w - rad, x + rad, x + rad, x + w - rad}, cy[4] = {y + rad, y + rad, y + h - rad, y + h - rad};
+    const int seg = 10;
+    const int n = 4 * (seg + 1);
+    for (int q = 0; q < 4; ++q)
+        for (int i = 0; i <= seg; ++i) {
+            const int k = q * (seg + 1) + i;
+            const float a = float(M_PI) / 2 * (q + float(i) / seg);
+            const float ca = std::cos(a), sa = std::sin(a);
+            const SDL_Color c = hsv(float(k) / n + phase * 0.12f, 0.62f, 1.0f, Uint8(200 + 55 * pulse));
+            v.push_back(vtx(cx[q] + ca * outR, cy[q] - sa * outR, c));
+            v.push_back(vtx(cx[q] + ca * inR, cy[q] - sa * inR, c));
+        }
+    for (int i = 0; i < n; ++i) {
+        const int a = 2 * i, b = 2 * ((i + 1) % n);
+        idx.insert(idx.end(), {a, a + 1, b, b, a + 1, b + 1});
+    }
+    SDL_RenderGeometry(r, nullptr, v.data(), int(v.size()), idx.data(), int(idx.size()));
+}
+
+// Soft drop shadow: a few expanding translucent rounded rects.
+void Gfx::shadow(float x, float y, float w, float h, float rad, float spread, Uint8 alpha) {
+    for (int i = 4; i >= 1; --i) {
+        const float e = spread * i / 4;
+        fillRound(x - e, y - e + spread * 0.4f, w + 2 * e, h + 2 * e, rad + e, SDL_Color{0, 0, 0, Uint8(alpha / 4)});
+    }
+}
 
 // UTF-8 aware trim to fit
 static std::string elide(TTF_Font *f, const std::string &s, int maxW) {
@@ -296,10 +357,11 @@ void Gfx::icon(const std::string &n, float cx, float cy, float s, SDL_Color c) {
     }
 }
 
+// Controller button glyph: filled circle (or pill for ZL/ZR/L/R) with the letter cut out in the background colour
 int Gfx::badge(const std::string &label, float x, float y, SDL_Color bg, SDL_Color fg) {
-    const int w = std::max(24, measure(label, 13, true) + 12);
-    fillRound(x, y, float(w), 24, 12, bg);
-    text(label, x + w / 2.f, y + 3, 13, fg, 0, Align::Center, true);
+    const int w = std::max(26, measure(label, 14, true) + 14);
+    fillRound(x, y, float(w), 26, 13, bg);
+    text(label, x + w / 2.f, y + 3, 14, fg, 0, Align::Center, true);
     return w;
 }
 
@@ -339,11 +401,24 @@ void Thumbs::pump() {
     std::vector<std::pair<std::string, std::string>> got;
     { std::lock_guard<std::mutex> l(mu); got.swap(ready); }
     for (auto &[vid, bytes] : got) {
-        SDL_Texture *t = bytes.empty() ? nullptr : IMG_LoadTexture_RW(r, SDL_RWFromConstMem(bytes.data(), int(bytes.size())), 1);
+        SDL_Surface *src = bytes.empty() ? nullptr : IMG_Load_RW(SDL_RWFromConstMem(bytes.data(), int(bytes.size())), 1);
+        if (!src) continue;
+        // hqdefault is 480x360 with the 16:9 picture letterboxed in the middle: keep a centred square of the picture
+        const int ph = src->w * 9 / 16, side = std::min(ph, src->h);
+        SDL_Rect cr{(src->w - side) / 2, (src->h - side) / 2, side, side};
+        SDL_Surface *sq = SDL_CreateRGBSurfaceWithFormat(0, side, side, 32, SDL_PIXELFORMAT_ARGB8888);
+        SDL_Texture *t = nullptr;
+        if (sq) {
+            SDL_BlitSurface(src, &cr, sq, nullptr);
+            t = SDL_CreateTextureFromSurface(r, sq);
+            SDL_FreeSurface(sq);
+        }
+        SDL_FreeSurface(src);
         if (!t) continue;
+        SDL_SetTextureScaleMode(t, SDL_ScaleModeLinear);
         tex[vid] = t;
         lru.push_front(vid);
-        while (lru.size() > 160) {
+        while (lru.size() > 120) {
             const std::string old = lru.back();
             lru.pop_back();
             SDL_DestroyTexture(tex[old]);

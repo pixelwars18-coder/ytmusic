@@ -2,17 +2,22 @@
 #include <algorithm>
 #include <cmath>
 #include <random>
+#include <ctime>
 
 namespace {
 constexpr float W = 1280, H = 720;
-constexpr float kSideW = 252, kCX = 276, kCW = W - kCX - 24;
-constexpr float kListY = 116, kRowH = 80, kBarY = 610, kBarH = 94;
-constexpr float kListH = kBarY - 14 - kListY;
-constexpr int kMenuVisible = 10;
+// Console home-menu layout: top bar, a row of square tiles, the round section buttons, a hint bar.
+constexpr float kTopH = 84;
+constexpr float kTileY = 158, kTile = 256, kGap = 22, kTileX0 = 64;
+constexpr float kTabY = 478, kTabH = 96, kTabBtn = 70, kTabStep = 100;
+constexpr float kHintY = 652;
+constexpr float kListX = 64, kListW = W - 128, kListY = 112, kRowH = 66, kListH = 440 - 112;   // Settings list
+constexpr int kMenuVisible = 9;
 const char *kViewNames[] = {"Search", "Queue", "Liked", "Playlists", "Downloads", "Settings"};
 const char *kViewIcons[] = {"search", "queue", "heart", "list", "download", "gear"};
 std::mt19937 &rng() { static std::mt19937 r{std::random_device{}()}; return r; }
 std::string songs(size_t n) { return std::to_string(n) + (n == 1 ? " song" : " songs"); }
+float tabX(int i) { return W / 2 - (int(5) * kTabStep) / 2 + i * kTabStep; }   // centre of section button i
 bool fresh(const YT::Stream &s) { return s.ok() && (s.expires == 0 || s.expires - nowSecs() > 600); }
 }
 
@@ -21,10 +26,12 @@ bool App::init(SDL_Renderer *r, const std::vector<Gfx::FontBlob> &fonts) {
     thumbs.start(r);
     mkdirs(Paths::root());
     lib.load();
+    setDarkTheme(lib.dark);
     player.init();
     player.setVolume(lib.volume);
     dl.start();
     if (!lib.queue.empty()) view = View::Queue;
+    tabSel = int(view);
     return true;
 }
 
@@ -80,6 +87,7 @@ std::vector<App::Row> App::rows() {
         act("Clear recent searches", std::to_string(lib.history.size()) + " saved", "clearhist");
         act("Shuffle: " + std::string(lib.shuffle ? "on" : "off"), "Play the queue in random order", "shuffle");
         act(std::string("Repeat: ") + (lib.repeat == 0 ? "off" : lib.repeat == 1 ? "all" : "one"), "What happens at the end of the queue", "repeat");
+        act(std::string("Theme: ") + (lib.dark ? "Basic Dark" : "Basic Light"), "Switch between the dark and light look", "theme");
         act("Controls", "A play · X like · Y search · \xE2\x88\x92 menu · + play/pause (hold: exit) · ZL/ZR prev/next · R-stick seek/volume", "help");
         act("Exit", "Saves and closes YT Music", "exit");
         return v;
@@ -390,6 +398,7 @@ void App::activate(const Row &r) {
         else if (r.id == "shuffle") { lib.shuffle = !lib.shuffle; nextPick = -1; lib.markDirty(); }
         else if (r.id == "repeat") { lib.repeat = (lib.repeat + 1) % 3; lib.markDirty(); }
         else if (r.id == "exit") quitting = true;
+        else if (r.id == "theme") { lib.dark = !lib.dark; setDarkTheme(lib.dark); lib.markDirty(); }
         return;
     case Row::Song:
         if (view == View::Queue) playIndex(r.index);
@@ -401,13 +410,25 @@ void App::activate(const Row &r) {
 void App::switchView(int dir) {
     int v = (int(view) + dir + int(View::Count)) % int(View::Count);
     view = View(v);
+    tabSel = v;
 }
 
+// keeps the selection on screen: vertical list (Settings) or the horizontal tile row
 void App::ensureVisible() {
     const int v = int(view);
-    const float y = sel[v] * kRowH;
-    if (y < scroll[v]) scroll[v] = y;
-    if (y + kRowH > scroll[v] + kListH) scroll[v] = y + kRowH - kListH;
+    if (view == View::Settings) {
+        const float y = sel[v] * kRowH;
+        if (y < scroll[v]) scroll[v] = y;
+        if (y + kRowH > scroll[v] + kListH) scroll[v] = y + kRowH - kListH;
+        if (scroll[v] < 0) scroll[v] = 0;
+        return;
+    }
+    const float step = kTile + kGap;
+    const float x = sel[v] * step;
+    const float visible = W - 2 * kTileX0;
+    // keep one tile of context on each side, like the home menu
+    if (x - step < scroll[v]) scroll[v] = std::max(0.f, x - step);
+    if (x + step * 2 > scroll[v] + visible) scroll[v] = x + step * 2 - visible;
     if (scroll[v] < 0) scroll[v] = 0;
 }
 
@@ -421,6 +442,7 @@ bool App::frame(const Input &in) {
     thumbs.pump();
     for (auto &m : dl.takeMessages()) toast(m);
     if (toastT > 0) toastT -= in.dt;
+    clock += in.dt;
 
     // player housekeeping
     const Player::State ps = player.state();
@@ -440,6 +462,7 @@ bool App::frame(const Input &in) {
     const int v = int(view);
     int &s = sel[v];
     s = std::clamp(s, 0, std::max(0, int(rs.size()) - 1));
+    const bool listView = view == View::Settings;
 
     // ---------------- menu overlay
     if (!menu.empty()) {
@@ -448,13 +471,13 @@ bool App::frame(const Input &in) {
         const int vis = std::min(int(menu.size()), kMenuVisible);
         if (menuSel < menuTop) menuTop = menuSel;
         if (menuSel >= menuTop + vis) menuTop = menuSel - vis + 1;
-        const float mh = 64 + vis * 52.f;
-        const float mx = (W - 560) / 2, my = (H - mh) / 2;
+        const float mh = 84 + vis * 54.f, mw = 620;
+        const float mx = (W - mw) / 2, my = (H - mh) / 2;
         bool fire = (in.down & B_A) != 0;
         if (in.touching && !touchWas) {
-            const int i = menuTop + int((in.ty - my - 60) / 52);
-            if (in.tx >= mx && in.tx <= mx + 560 && in.ty > my + 60 && i >= 0 && i < int(menu.size())) { menuSel = i; fire = true; }
-            else if (in.tx < mx || in.tx > mx + 560 || in.ty < my || in.ty > my + mh) menu.clear();
+            const int i = menuTop + int((in.ty - my - 72) / 54);
+            if (in.tx >= mx && in.tx <= mx + mw && in.ty > my + 72 && i >= 0 && i < int(menu.size())) { menuSel = i; fire = true; }
+            else if (in.tx < mx || in.tx > mx + mw || in.ty < my || in.ty > my + mh) menu.clear();
         }
         touchWas = in.touching;
         if (fire && menuSel < int(menu.size())) {
@@ -466,21 +489,36 @@ bool App::frame(const Input &in) {
         return !quitting;
     }
 
-    // ---------------- navigation with key repeat
+    // ---------------- directional input with key repeat (d-pad or left stick)
     uint32_t dir = 0;
-    if ((in.held & B_UP) || in.ly > 0.5f) dir = B_UP;
-    else if ((in.held & B_DOWN) || in.ly < -0.5f) dir = B_DOWN;
+    if ((in.held & B_UP) || in.ly > 0.55f) dir = B_UP;
+    else if ((in.held & B_DOWN) || in.ly < -0.55f) dir = B_DOWN;
+    else if ((in.held & B_LEFT) || in.lx < -0.55f) dir = B_LEFT;
+    else if ((in.held & B_RIGHT) || in.lx > 0.55f) dir = B_RIGHT;
+    uint32_t step = 0;   // a direction "press" this frame (first press + repeats)
     if (dir) {
-        if (dir != lastDir) { repeatT = 0.38f; lastDir = dir; s += dir == B_DOWN ? 1 : -1; }
-        else if ((repeatT -= in.dt) <= 0) { repeatT = 0.065f; s += dir == B_DOWN ? 1 : -1; }
-        s = std::clamp(s, 0, std::max(0, int(rs.size()) - 1));
-        ensureVisible();
+        if (dir != lastDir) { repeatT = 0.36f; lastDir = dir; step = dir; }
+        else if ((repeatT -= in.dt) <= 0) { repeatT = 0.075f; step = dir; }
     } else lastDir = 0;
-    if (in.down & B_RIGHT) { s = std::min(int(rs.size()) - 1, s + 6); s = std::max(s, 0); ensureVisible(); }
-    if (in.down & B_LEFT) { s = std::max(0, s - 6); ensureVisible(); }
 
-    if (in.down & B_L) switchView(-1);
-    if (in.down & B_R) switchView(1);
+    const int focusAtStart = focus;   // a button that moves focus shouldn't also act on the new target
+    if (focus == 1) {   // section buttons
+        if (step == B_LEFT && tabSel > 0) { --tabSel; view = View(tabSel); }
+        if (step == B_RIGHT && tabSel < int(View::Count) - 1) { ++tabSel; view = View(tabSel); }
+        if (step == B_UP || (in.down & (B_A | B_B))) focus = 0;
+    } else if (listView) {
+        if (step == B_UP) s = std::max(0, s - 1);
+        if (step == B_DOWN) { if (s + 1 >= int(rs.size())) { focus = 1; tabSel = v; } else ++s; }
+        ensureVisible();
+    } else {
+        if (step == B_LEFT) s = std::max(0, s - 1);
+        if (step == B_RIGHT) s = std::min(std::max(0, int(rs.size()) - 1), s + 1);
+        if (step == B_DOWN) { focus = 1; tabSel = v; }
+        if (step & (B_LEFT | B_RIGHT)) ensureVisible();
+    }
+
+    if (in.down & B_L) { switchView(-1); }
+    if (in.down & B_R) { switchView(1); }
     if (in.down & B_Y) askSearch();
     if (in.down & B_ZL) prev();
     if (in.down & B_ZR) next(false);
@@ -502,308 +540,357 @@ bool App::frame(const Input &in) {
     } else seekAccum = 0.18f;
     if (std::fabs(in.ry) > 0.5f) {
         volAccum += in.dt;
-        if (volAccum > 0.08f) { volAccum = 0; player.setVolume(player.volume() + (in.ry > 0 ? 2 : -2)); }
+        if (volAccum > 0.08f) { volAccum = 0; player.setVolume(player.volume() + (in.ry > 0 ? 2 : -2)); toastVol = 1.2f; }
     } else volAccum = 0.08f;
+    if (toastVol > 0) toastVol -= in.dt;
 
-    if (in.down & B_B) {
+    if (focusAtStart == 0 && (in.down & B_B)) {
         if (view == View::Playlists && !openPlaylist.empty()) { openPlaylist.clear(); sel[v] = playlistsSel; ensureVisible(); }
         else if (view == View::Search && !results.empty()) { results.clear(); searchStatus.clear(); ++searchGen; searching = false; }
     }
     rs = rows();
     s = std::clamp(s, 0, std::max(0, int(rs.size()) - 1));
-    if (!rs.empty()) {
-        const Row &r = rs[size_t(s)];
-        if (in.down & B_A) activate(r);
-        else if ((in.down & B_X) && (r.kind == Row::Song)) { lib.toggleLike(r.t); toast(lib.isLiked(r.t.vid) ? "Added to liked" : "Removed from liked"); }
-        else if (in.down & B_MINUS) openMenu(&r);
+    if (focusAtStart == 0) {
+        if (!rs.empty()) {
+            const Row &r = rs[size_t(s)];
+            if (in.down & B_A) activate(r);
+            else if ((in.down & B_X) && (r.kind == Row::Song)) { lib.toggleLike(r.t); toast(lib.isLiked(r.t.vid) ? "Added to liked" : "Removed from liked"); }
+            else if (in.down & B_MINUS) openMenu(&r);
+        } else if (in.down & B_MINUS) openMenu(nullptr);
     } else if (in.down & B_MINUS) openMenu(nullptr);
 
-    // ---------------- touch
-    if (in.touching && !touchWas) { touchStartX = in.tx; touchStartY = touchLastY = in.ty; dragging = false; }
+    // ---------------- touch: tap to select / tap again to open, drag the tile row
+    if (in.touching && !touchWas) { touchStartX = touchLastX = in.tx; touchStartY = touchLastY = in.ty; dragging = false; }
     if (in.touching && touchWas) {
-        if (std::fabs(in.ty - touchStartY) > 14 && touchStartX > kCX && touchStartY > kListY && touchStartY < kBarY) dragging = true;
+        const bool inRow = listView ? (touchStartY > kListY && touchStartY < kListY + kListH) : (touchStartY > kTileY - 30 && touchStartY < kTileY + kTile + 40);
+        if (inRow && (listView ? std::fabs(in.ty - touchStartY) : std::fabs(in.tx - touchStartX)) > 14) dragging = true;
         if (dragging) {
-            scroll[v] = std::clamp(scroll[v] - (in.ty - touchLastY), 0.f, std::max(0.f, rs.size() * kRowH - kListH));
+            if (listView) scroll[v] = std::clamp(scroll[v] - (in.ty - touchLastY), 0.f, std::max(0.f, rs.size() * kRowH - kListH));
+            else scroll[v] = std::clamp(scroll[v] - (in.tx - touchLastX), 0.f, std::max(0.f, rs.size() * (kTile + kGap) - (W - 2 * kTileX0)));
+            scrollShown[v] = scroll[v];
+            touchLastX = in.tx;
             touchLastY = in.ty;
         }
     }
     if (!in.touching && touchWas && !dragging) {   // tap
         const float x = touchStartX, y = touchStartY;
-        if (x < kSideW && y > 96 && y < 96 + int(View::Count) * 58) view = View(int((y - 96) / 58));
-        else if (x > kCX && y > kListY && y < kBarY - 14) {
+        int hitTab = -1;
+        for (int i = 0; i < int(View::Count); ++i)
+            if (std::hypot(x - tabX(i), y - (kTabY + kTabH / 2)) < kTabBtn / 2 + 6) hitTab = i;
+        if (hitTab >= 0) { view = View(hitTab); tabSel = hitTab; focus = 0; }
+        else if (listView && y > kListY && y < kListY + kListH && x > kListX && x < kListX + kListW) {
             const int i = int((y - kListY + scroll[v]) / kRowH);
-            if (i >= 0 && i < int(rs.size())) {
-                if (i == s) activate(rs[size_t(i)]);
-                else s = i;
-            }
-        } else if (y > kBarY) {
-            const float cx = W / 2 + 40;
-            if (std::fabs(x - cx) < 34) player.togglePause();
-            else if (std::fabs(x - (cx - 72)) < 26) prev();
-            else if (std::fabs(x - (cx + 72)) < 26) next(false);
-            else if (y > kBarY + kBarH - 24 && x > kCX && x < W - 220 && player.duration() > 0)
-                player.seek((x - kCX) / (W - 220 - kCX) * player.duration());
-        } else if (x > kCX + kCW - 160 && y < kListY - 10) askSearch();
+            if (i >= 0 && i < int(rs.size())) { focus = 0; if (i == s) activate(rs[size_t(i)]); else s = i; }
+        } else if (!listView && y > kTileY && y < kTileY + kTile) {
+            const int i = int((x - kTileX0 + scrollShown[v]) / (kTile + kGap));
+            if (i >= 0 && i < int(rs.size())) { focus = 0; if (i == s) activate(rs[size_t(i)]); else s = i; }
+        } else if (y > kHintY) {
+            if (x < 520) player.togglePause();
+            else if (x > W - 170) askSearch();
+        }
     }
     touchWas = in.touching;
 
     // infinite scroll for search results
-    if (view == View::Search && !results.empty() && s >= int(results.size()) - 6) loadMore();
+    if (view == View::Search && !results.empty() && s >= int(results.size()) - 5) loadMore();
 
-    // smooth scroll toward selection when not dragging is handled by ensureVisible (instant)
+    // smooth horizontal scrolling
+    for (int i = 0; i < int(View::Count); ++i) {
+        const float d = scroll[i] - scrollShown[i];
+        scrollShown[i] = std::fabs(d) < 0.5f ? scroll[i] : scrollShown[i] + d * std::min(1.f, in.dt * 14);
+    }
     g.endFrame();
     return !quitting;
 }
 
 // ---------------------------------------------------------------- drawing
 void App::render() {
-    SDL_SetRenderDrawColor(g.r, Col::surface.r, Col::surface.g, Col::surface.b, 255);
+    const Theme &t = TH();
+    SDL_SetRenderDrawColor(g.r, t.bg.r, t.bg.g, t.bg.b, 255);
     SDL_RenderClear(g.r);
-    drawSidebar();
-    drawHeader();
-    drawList();
-    drawPlayerBar();
+    drawTopBar();
+    if (view == View::Settings) drawList();
+    else drawTiles();
+    drawTabs();
+    drawHints();
     drawToast();
     drawMenu();
 }
 
-void App::drawSidebar() {
-    g.fillRect(0, 0, kSideW, H, Col::alpha(Col::surfaceVariant, 160));
-    g.fillRect(kSideW - 1, 0, 1, H, Col::outline);
-    g.fillCircle(42, 48, 18, Col::primary);
-    g.icon("play", 43, 48, 16, Col::onPrimary);
-    g.text("YT Music", 70, 34, 24, Col::onSurface, 0, Align::Left, true);
-    for (int i = 0; i < int(View::Count); ++i) {
-        const float y = 96 + i * 58;
-        const bool on = int(view) == i;
-        if (on) g.fillRound(14, y, kSideW - 28, 48, 24, Col::secondary);
-        const SDL_Color fg = on ? Col::onPrimary : Col::onSurface;
-        g.icon(kViewIcons[i], 44, y + 24, 20, fg);
-        g.text(kViewNames[i], 68, y + 12, 19, fg, 0, Align::Left, on);
-        std::string count;
-        if (i == int(View::Queue) && !lib.queue.empty()) count = std::to_string(lib.queue.size());
-        if (i == int(View::Liked) && !lib.liked.empty()) count = std::to_string(lib.liked.size());
-        if (i == int(View::Playlists) && !lib.playlists.empty()) count = std::to_string(lib.playlists.size());
-        if (i == int(View::Downloads)) { const int p = dl.pending(); if (p) count = "\xE2\x86\x93" + std::to_string(p); }
-        if (!count.empty()) g.text(count, kSideW - 30, y + 14, 15, on ? Col::onPrimary : Col::onSurfaceVariant, 0, Align::Right);
-    }
-    float hy = H - 168;
-    g.badge("L", 24, hy); g.badge("R", 54, hy);
-    g.text("switch tabs", 88, hy + 2, 15, Col::onSurfaceVariant);
-    hy += 32;
-    g.badge("Y", 24, hy);
-    g.text("search", 58, hy + 2, 15, Col::onSurfaceVariant);
-    hy += 32;
-    g.badge("\xE2\x88\x92", 24, hy);
-    g.text("more options", 58, hy + 2, 15, Col::onSurfaceVariant);
-}
-
-void App::drawHeader() {
+void App::drawTopBar() {
+    const Theme &t = TH();
+    // "user" badge: the app's own round icon
+    g.fillCircle(66, 46, 27, t.accent);
+    g.icon("music", 66, 46, 26, t.onAccent);
     std::string title = kViewNames[int(view)], sub;
     if (view == View::Search) {
-        if (!query.empty() && !results.empty()) { title = query; sub = songs(results.size()) + (continuation.empty() ? "" : " \xC2\xB7 scroll for more"); }
-        else if (results.empty()) sub = lib.history.empty() ? "Press Y to search" : "Recent searches";
+        if (!query.empty() && !results.empty()) { title = "\xE2\x80\x9C" + query + "\xE2\x80\x9D"; sub = songs(results.size()) + (continuation.empty() ? "" : "+"); }
+        else sub = lib.history.empty() ? "Press Y to search YouTube" : "Recent searches";
     } else if (view == View::Queue) sub = lib.queue.empty() ? "Nothing queued" : songs(lib.queue.size()) + (lib.shuffle ? " \xC2\xB7 shuffle" : "") + (lib.repeat == 1 ? " \xC2\xB7 repeat all" : lib.repeat == 2 ? " \xC2\xB7 repeat one" : "");
     else if (view == View::Liked) sub = songs(lib.liked.size());
     else if (view == View::Playlists) {
-        if (Playlist *p = lib.find(openPlaylist)) { title = p->name; sub = songs(p->tracks.size()) + " \xC2\xB7 B to go back"; }
-        else sub = std::to_string(lib.playlists.size()) + " playlists";
+        if (Playlist *p = lib.find(openPlaylist)) { title = p->name; sub = songs(p->tracks.size()) + " \xC2\xB7 B: all playlists"; }
+        else sub = std::to_string(lib.playlists.size()) + (lib.playlists.size() == 1 ? " playlist" : " playlists");
     } else if (view == View::Downloads) {
         const int p = dl.pending();
-        sub = std::to_string(dl.list().size()) + " on SD card" + (p ? " \xC2\xB7 " + std::to_string(p) + " downloading" : "") + " \xC2\xB7 play offline";
-    } else if (view == View::Settings) sub = "Library is stored in " + Paths::root();
-    g.text(title, kCX, 26, 30, Col::onSurface, int(kCW - 200), Align::Left, true);
-    g.text(sub, kCX, 70, 16, Col::onSurfaceVariant, int(kCW - 200));
-    // search pill
-    const float px = kCX + kCW - 170;
-    g.fillRound(px, 30, 170, 44, 22, Col::surfaceVariant);
-    g.strokeRound(px, 30, 170, 44, 22, 1, Col::outline);
-    g.icon("search", px + 26, 52, 18, Col::onSurfaceVariant);
-    g.text("Search", px + 46, 41, 17, Col::onSurfaceVariant);
-    g.badge("Y", px + 128, 40, Col::outline, Col::onSurface);
+        sub = std::to_string(dl.list().size()) + " on the SD card" + (p ? " \xC2\xB7 " + std::to_string(p) + " downloading" : "");
+    } else sub = "YT Music \xC2\xB7 data in " + Paths::root();
+    g.text(title, 108, 24, 22, t.text, 640, Align::Left, true);
+    g.text(sub, 108, 54, 15, t.sub, 640);
+
+    // clock + battery, right aligned
+    float x = W - 56;
+    const int pct = battery ? battery() : -1;
+    if (pct >= 0) {
+        const float bw = 34, bh = 17, by = 38;
+        g.strokeRound(x - bw, by, bw, bh, 4, 2, t.text);
+        g.fillRound(x + 1, by + 5, 3, bh - 10, 1, t.text);
+        const SDL_Color fill = pct <= 15 ? t.danger : t.text;
+        g.fillRound(x - bw + 4, by + 4, (bw - 8) * pct / 100.f, bh - 8, 2, fill);
+        x -= bw + 10;
+        x -= g.text(std::to_string(pct) + "%", x, 36, 17, t.text, 0, Align::Right) + 18;
+    }
+    const time_t now = time(nullptr);
+    struct tm lt;
+    localtime_r(&now, &lt);
+    char clk[16];
+    snprintf(clk, sizeof clk, "%d:%02d", lt.tm_hour, lt.tm_min);
+    g.text(clk, x, 33, 22, t.text, 0, Align::Right, true);
 }
 
-void App::drawRowSong(const Row &r, float y, bool selected) {
-    const float x = kCX;
-    const bool playing = lib.current >= 0 && lib.current < int(lib.queue.size()) && lib.queue[size_t(lib.current)].vid == r.t.vid &&
-                         (view != View::Queue || r.index == lib.current);
-    SDL_Texture *tx = thumbs.get(r.t.vid);
-    g.fillRound(x + 10, y + 8, 112, 63, 10, Col::surfaceVariant);
-    if (tx) g.image(tx, x + 10, y + 8, 112, 63, 10);
-    else g.icon("music", x + 66, y + 40, 22, Col::outline);
-    if (playing) {
-        g.fillRound(x + 10, y + 8, 112, 63, 10, SDL_Color{8, 8, 32, 170});
-        g.icon(player.state() == Player::Paused ? "play" : "music", x + 66, y + 40, 22, Col::primary);
-    }
-    // download badge on the thumbnail
-    if (dl.isDownloaded(r.t.vid)) {
-        g.fillCircle(x + 110, y + 60, 10, Col::primary);
-        g.icon("check", x + 110, y + 60, 12, Col::onPrimary);
-    } else if (dl.isActive(r.t.vid)) {
-        g.fillCircle(x + 110, y + 60, 11, SDL_Color{7, 7, 34, 230});
-        const double p = dl.progress(r.t.vid);
-        g.fillRound(x + 99, y + 72 - 4, float(22 * std::max(0.08, p)), 3, 1.5f, Col::primary);
-        g.icon("download", x + 110, y + 59, 11, Col::onSurface);
-    }
-    const float tx0 = x + 138, tw = kCW - 138 - 150;
-    g.text(r.t.title, tx0, y + 14, 20, playing ? Col::primary : Col::onSurface, int(tw), Align::Left, selected);
-    g.text(r.t.artist, tx0, y + 44, 16, Col::onSurfaceVariant, int(tw));
-    g.text(fmtTime(r.t.duration), x + kCW - 24, y + 28, 16, Col::onSurfaceVariant, 0, Align::Right);
-    if (lib.isLiked(r.t.vid)) g.icon("heart", x + kCW - 100, y + 40, 18, Col::primary);
-}
-
-void App::drawList() {
+// The row of square tiles (songs, playlists or recent searches)
+void App::drawTiles() {
+    const Theme &t = TH();
     auto rs = rows();
     const int v = int(view);
-    SDL_Rect clip{int(kCX - 4), int(kListY), int(kCW + 8), int(kListH)};
-    SDL_RenderSetClipRect(g.r, &clip);
     if (rs.empty()) {
         std::string msg;
-        if (view == View::Search) msg = searching ? searchStatus : (searchStatus.empty() ? "Press Y to search YouTube" : searchStatus);
+        if (view == View::Search) msg = searching ? "Searching\xE2\x80\xA6" : (searchStatus.empty() ? "Press Y to search YouTube, or paste a link" : searchStatus);
         else if (view == View::Queue) msg = "The queue is empty. Play something from Search or Liked.";
         else if (view == View::Liked) msg = "No liked songs yet. Press X on a song to like it.";
-        else if (view == View::Playlists) msg = "This playlist is empty. Use \xE2\x88\x92 on a song \xE2\x86\x92 Add to playlist.";
-        else if (view == View::Downloads) msg = "Nothing downloaded yet. Use \xE2\x88\x92 on a song \xE2\x86\x92 Download.";
-        if (searching) {
-            const float t = SDL_GetTicks() / 1000.f;
-            for (int i = 0; i < 3; ++i) g.fillCircle(kCX + kCW / 2 - 24 + i * 24, kListY + kListH / 2 - 40, 6, Col::alpha(Col::primary, Uint8(120 + 135 * (0.5f + 0.5f * std::sin(t * 6 - i)))));
-        }
-        g.text(msg, kCX + kCW / 2, kListY + kListH / 2 - 10, 19, Col::onSurfaceVariant, int(kCW - 80), Align::Center);
-        SDL_RenderSetClipRect(g.r, nullptr);
+        else if (view == View::Playlists) msg = "This playlist is empty. Press \xE2\x88\x92 on a song \xE2\x86\x92 Add to playlist.";
+        else if (view == View::Downloads) msg = "Nothing downloaded yet. Press \xE2\x88\x92 on a song \xE2\x86\x92 Download.";
+        g.fillRound(kTileX0, kTileY, W - 2 * kTileX0, kTile, 28, t.panel);
+        if (searching)
+            for (int i = 0; i < 3; ++i)
+                g.fillCircle(W / 2 - 26 + i * 26, kTileY + kTile / 2 - 30, 7, Col::alpha(t.accent, Uint8(110 + 145 * (0.5f + 0.5f * std::sin(clock * 6 - i)))));
+        g.text(msg, W / 2, kTileY + kTile / 2 - 4, 20, t.sub, int(W - 2 * kTileX0 - 80), Align::Center);
         return;
     }
-    const int first = std::max(0, int(scroll[v] / kRowH));
+    const float step = kTile + kGap;
+    const int sv = sel[v];
+    SDL_Rect clip{0, int(kTileY - 70), int(W), int(kTile + 140)};
+    SDL_RenderSetClipRect(g.r, &clip);
+    const int first = std::max(0, int((scrollShown[v]) / step) - 1);
     for (int i = first; i < int(rs.size()); ++i) {
-        const float y = kListY + i * kRowH - scroll[v];
-        if (y > kListY + kListH) break;
+        const float x = kTileX0 + i * step - scrollShown[v];
+        if (x > W) break;
+        if (x + kTile < 0) continue;
         const Row &r = rs[size_t(i)];
-        const bool selected = i == sel[v];
-        if (selected) {
-            g.fillRound(kCX, y + 2, kCW, kRowH - 4, 18, Col::surfaceVariant);
-            g.strokeRound(kCX, y + 2, kCW, kRowH - 4, 18, 2, Col::alpha(Col::secondary, 200));
+        const bool on = i == sv;
+        g.shadow(x, kTileY, kTile, kTile, 26, 10, darkTheme() ? 90 : 40);
+        g.fillRound(x, kTileY, kTile, kTile, 26, t.panel);
+        std::string vid = r.t.vid;
+        if (SDL_Texture *tx = vid.empty() ? nullptr : thumbs.get(vid)) g.image(tx, x, kTileY, kTile, kTile, 26);
+        else if (r.kind == Row::Query) {
+            g.fillRound(x, kTileY, kTile, kTile, 26, t.panelHi);
+            g.icon("search", x + kTile / 2, kTileY + 92, 56, t.accent);
+            g.text(r.label, x + kTile / 2, kTileY + 158, 20, t.text, int(kTile - 30), Align::Center, true);
+        } else if (r.kind == Row::NewPlaylist) {
+            g.fillRound(x, kTileY, kTile, kTile, 26, t.panelHi);
+            g.fillCircle(x + kTile / 2, kTileY + 108, 42, t.accent);
+            g.text("+", x + kTile / 2, kTileY + 80, 52, t.onAccent, 0, Align::Center, true);
+            g.text("New playlist", x + kTile / 2, kTileY + 170, 19, t.text, 0, Align::Center, true);
+        } else {
+            g.icon(r.kind == Row::PlaylistRow ? "list" : "music", x + kTile / 2, kTileY + kTile / 2, 60, t.line);
         }
-        switch (r.kind) {
-        case Row::Song: drawRowSong(r, y, selected); break;
-        case Row::Query:
-            g.fillCircle(kCX + 40, y + 40, 22, Col::surfaceVariant);
-            g.icon("search", kCX + 40, y + 40, 18, Col::onSurfaceVariant);
-            g.text(r.label, kCX + 80, y + 28, 20, Col::onSurface, int(kCW - 120), Align::Left, selected);
-            break;
-        case Row::NewPlaylist:
-            g.fillRound(kCX + 10, y + 8, 112, 63, 10, Col::outline);
-            g.text("+", kCX + 66, y + 18, 30, Col::onSurface, 0, Align::Center, true);
-            g.text(r.label, kCX + 138, y + 14, 20, Col::onSurface, 0, Align::Left, selected);
-            g.text(r.sub, kCX + 138, y + 44, 16, Col::onSurfaceVariant);
-            break;
-        case Row::PlaylistRow: {
-            g.fillRound(kCX + 10, y + 8, 112, 63, 10, Col::surfaceVariant);
-            if (SDL_Texture *t = thumbs.get(r.t.vid)) g.image(t, kCX + 10, y + 8, 112, 63, 10);
-            else g.icon("list", kCX + 66, y + 40, 22, Col::outline);
-            g.text(r.label, kCX + 138, y + 14, 20, Col::onSurface, int(kCW - 200), Align::Left, selected);
-            g.text(r.sub, kCX + 138, y + 44, 16, Col::onSurfaceVariant);
-            break;
+        if (r.kind == Row::PlaylistRow) {   // name band along the bottom of playlist tiles
+            g.fillRound(x, kTileY + kTile - 64, kTile, 64, 26, SDL_Color{0, 0, 0, 150});
+            g.fillRect(x, kTileY + kTile - 64, kTile, 30, SDL_Color{0, 0, 0, 150});
+            g.text(r.label, x + 18, kTileY + kTile - 56, 19, SDL_Color{255, 255, 255, 255}, int(kTile - 36), Align::Left, true);
+            g.text(r.sub, x + 18, kTileY + kTile - 30, 14, SDL_Color{220, 220, 228, 255});
         }
-        case Row::Action:
-            g.text(r.label, kCX + 24, y + 14, 20, r.id == "exit" ? Col::error : Col::onSurface, int(kCW - 48), Align::Left, selected);
-            g.text(r.sub, kCX + 24, y + 44, 15, Col::onSurfaceVariant, int(kCW - 48));
-            break;
+        if (r.kind == Row::Song) {
+            const bool playing = lib.current >= 0 && lib.current < int(lib.queue.size()) && lib.queue[size_t(lib.current)].vid == r.t.vid &&
+                                 (view != View::Queue || r.index == lib.current);
+            if (playing) {   // equaliser bars on the playing song
+                g.fillRound(x, kTileY, kTile, kTile, 26, SDL_Color{0, 0, 0, 120});
+                const bool moving = player.state() == Player::Playing;
+                for (int b = 0; b < 4; ++b) {
+                    const float hgt = moving ? 22 + 30 * (0.5f + 0.5f * std::sin(clock * (5 + b * 1.7f) + b)) : 18;
+                    g.fillRound(x + kTile / 2 - 34 + b * 18, kTileY + kTile / 2 + 26 - hgt, 12, hgt, 4, t.accent);
+                }
+            }
+            float bx = x + kTile - 16;
+            if (dl.isDownloaded(r.t.vid)) {
+                g.fillCircle(bx - 16, kTileY + 30, 17, t.accent);
+                g.icon("download", bx - 16, kTileY + 30, 16, t.onAccent);
+                bx -= 42;
+            } else if (dl.isActive(r.t.vid)) {
+                g.fillCircle(bx - 16, kTileY + 30, 17, SDL_Color{0, 0, 0, 170});
+                g.icon("download", bx - 16, kTileY + 30, 16, SDL_Color{255, 255, 255, 255});
+                g.fillRound(x + 14, kTileY + kTile - 16, (kTile - 28) * float(std::max(0.04, dl.progress(r.t.vid))), 6, 3, t.accent);
+                bx -= 42;
+            }
+            if (lib.isLiked(r.t.vid)) {
+                g.fillCircle(bx - 16, kTileY + 30, 17, SDL_Color{0, 0, 0, 150});
+                g.icon("heart", bx - 16, kTileY + 31, 17, SDL_Color{255, 110, 140, 255});
+            }
+            g.fillRound(x + 12, kTileY + kTile - 38, float(g.measure(fmtTime(r.t.duration), 14, true) + 16), 26, 13, SDL_Color{0, 0, 0, 160});
+            g.text(fmtTime(r.t.duration), x + 20, kTileY + kTile - 34, 14, SDL_Color{255, 255, 255, 255}, 0, Align::Left, true);
         }
+        if (on && focus == 0) g.rainbowRing(x - 7, kTileY - 7, kTile + 14, kTile + 14, 32, 5, clock);
     }
-    if (view == View::Search && (loadingMore || !continuation.empty())) {
-        const float y = kListY + rs.size() * kRowH - scroll[v];
-        if (y < kListY + kListH) g.text(loadingMore ? "Loading more\xE2\x80\xA6" : "", kCX + kCW / 2, y + 20, 16, Col::onSurfaceVariant, 0, Align::Center);
+    SDL_RenderSetClipRect(g.r, nullptr);
+
+    // the selected item's name above the row, details below (like the home menu)
+    if (sv < int(rs.size())) {
+        const Row &r = rs[size_t(sv)];
+        const float x = std::clamp(kTileX0 + sv * step - scrollShown[v], kTileX0, W - kTileX0 - 600);
+        const std::string name = r.kind == Row::Song ? r.t.title : r.label;
+        g.text(name, x, kTileY - 48, 24, focus == 0 ? t.accent : t.sub, int(W - x - kTileX0), Align::Left, true);
+        std::string det;
+        if (r.kind == Row::Song) det = r.t.artist + "  \xC2\xB7  " + fmtTime(r.t.duration);
+        else if (r.kind == Row::PlaylistRow || r.kind == Row::NewPlaylist) det = r.sub;
+        else if (r.kind == Row::Query) det = "Search again";
+        g.text(det, x, kTileY + kTile + 16, 17, t.sub, int(W - x - kTileX0));
+        if (view == View::Search && loadingMore) g.text("Loading more\xE2\x80\xA6", W - kTileX0, kTileY + kTile + 16, 15, t.sub, 0, Align::Right);
+        else if (rs.size() > 1) g.text(std::to_string(sv + 1) + " / " + std::to_string(rs.size()) + (continuation.empty() || view != View::Search ? "" : "+"),
+                                       W - kTileX0, kTileY + kTile + 16, 15, t.sub, 0, Align::Right);
     }
-    // scrollbar
-    const float content = rs.size() * kRowH;
-    if (content > kListH) {
-        const float bh = std::max(40.f, kListH * kListH / content);
-        const float by = kListY + (kListH - bh) * (scroll[v] / (content - kListH));
-        g.fillRound(kCX + kCW + 6, by, 5, bh, 2.5f, Col::outline);
+}
+
+// Settings: a console-style list of options
+void App::drawList() {
+    const Theme &t = TH();
+    auto rs = rows();
+    const int v = int(view);
+    g.fillRound(kListX - 10, kListY - 10, kListW + 20, kListH + 20, 26, t.panel);
+    SDL_Rect clip{int(kListX - 10), int(kListY - 6), int(kListW + 20), int(kListH + 12)};
+    SDL_RenderSetClipRect(g.r, &clip);
+    for (int i = 0; i < int(rs.size()); ++i) {
+        const float y = kListY + i * kRowH - scrollShown[v];
+        if (y > kListY + kListH) break;
+        if (y + kRowH < kListY) continue;
+        const Row &r = rs[size_t(i)];
+        const bool on = i == sel[v] && focus == 0;
+        if (i > 0) g.fillRect(kListX + 20, y, kListW - 40, 1, t.line);
+        if (on) {
+            g.fillRound(kListX + 4, y + 4, kListW - 8, kRowH - 8, 16, t.panelHi);
+            g.rainbowRing(kListX + 2, y + 2, kListW - 4, kRowH - 4, 18, 4, clock);
+        }
+        g.text(r.label, kListX + 30, y + 10, 20, r.id == "exit" ? t.danger : t.text, int(kListW - 60), Align::Left, on);
+        g.text(r.sub, kListX + 30, y + 38, 14, t.sub, int(kListW - 60));
     }
     SDL_RenderSetClipRect(g.r, nullptr);
 }
 
-void App::drawPlayerBar() {
-    const float x = kCX - 8, y = kBarY, w = W - x - 16;
-    g.fillRound(x, y, w, kBarH, 22, Col::surfaceVariant);
-    g.strokeRound(x, y, w, kBarH, 22, 1, Col::outline);
-    const Track *t = (lib.current >= 0 && lib.current < int(lib.queue.size())) ? &lib.queue[size_t(lib.current)] : nullptr;
-    g.fillRound(x + 14, y + 14, 66, 66, 14, Col::surface);
-    if (t) {
-        if (SDL_Texture *tx = thumbs.get(t->vid)) g.image(tx, x + 14, y + 14, 66, 66, 14);
-        else g.icon("music", x + 47, y + 47, 24, Col::outline);
-    } else g.icon("music", x + 47, y + 47, 24, Col::outline);
+// Round section buttons in a rounded tray, label under the focused one
+void App::drawTabs() {
+    const Theme &t = TH();
+    const float trayW = (int(View::Count) - 1) * kTabStep + kTabBtn + 48;
+    g.fillRound(W / 2 - trayW / 2, kTabY, trayW, kTabH, kTabH / 2, t.panel);
+    for (int i = 0; i < int(View::Count); ++i) {
+        const float cx = tabX(i), cy = kTabY + kTabH / 2;
+        const bool current = int(view) == i;
+        g.fillCircle(cx, cy, kTabBtn / 2, current ? t.accent : t.panelHi);
+        g.icon(kViewIcons[i], cx, cy, 28, current ? t.onAccent : t.text);
+        std::string count;
+        if (i == int(View::Queue) && !lib.queue.empty()) count = std::to_string(lib.queue.size());
+        if (i == int(View::Downloads) && dl.pending()) count = std::to_string(dl.pending());
+        if (!count.empty()) {
+            const float bw = float(std::max(22, g.measure(count, 12, true) + 12));
+            g.fillRound(cx + 16, cy - 36, bw, 22, 11, t.danger);
+            g.text(count, cx + 16 + bw / 2, cy - 33, 12, SDL_Color{255, 255, 255, 255}, 0, Align::Center, true);
+        }
+        if (focus == 1 && i == tabSel) {
+            g.rainbowRing(cx - kTabBtn / 2 - 6, cy - kTabBtn / 2 - 6, kTabBtn + 12, kTabBtn + 12, kTabBtn / 2 + 6, 4, clock);
+            g.text(kViewNames[i], cx, kTabY + kTabH + 10, 17, t.accent, 0, Align::Center, true);
+        }
+    }
+}
+
+// Bottom bar: now playing on the left, button guide on the right (separated by a hairline, like the system menus)
+void App::drawHints() {
+    const Theme &t = TH();
+    g.fillRect(28, kHintY, W - 56, 1, t.line);
+    const Track *tr = (lib.current >= 0 && lib.current < int(lib.queue.size())) ? &lib.queue[size_t(lib.current)] : nullptr;
     const Player::State st = player.state();
-    const float tw = (W / 2 + 40 - 72 - 30) - (x + 94);   // up to the transport buttons
-    g.text(t ? t->title : "Nothing playing", x + 94, y + 18, 18, Col::onSurface, int(tw), Align::Left, true);
-    std::string sub = t ? t->artist : "Pick a song and press A";
+    const float y = kHintY + 12;
+    g.fillRound(36, y, 44, 44, 10, t.panel);
+    if (tr) { if (SDL_Texture *tx = thumbs.get(tr->vid)) g.image(tx, 36, y, 44, 44, 10); }
+    else g.icon("music", 58, y + 22, 18, t.sub);
+    const float tx0 = 92, tw = 400;
+    g.text(tr ? tr->title : "Nothing playing", tx0, y + 1, 16, t.text, int(tw), Align::Left, true);
+    std::string sub;
     if (loadingTrack || st == Player::Loading) sub = "Loading\xE2\x80\xA6";
-    g.text(sub, x + 94, y + 44, 15, (loadingTrack || st == Player::Loading) ? Col::tertiary : Col::onSurfaceVariant, int(tw));
+    else if (tr) sub = (st == Player::Paused ? "Paused \xC2\xB7 " : "") + fmtTime(player.position()) + " / " + fmtTime(player.duration() > 0 ? player.duration() : tr->duration);
+    else sub = "Pick a song and press A";
+    if (toastVol > 0) sub = "Volume " + std::to_string(player.volume());
+    g.text(sub, tx0, y + 24, 13, (loadingTrack || st == Player::Loading) ? t.accent : t.sub, int(tw));
+    // thin progress line under the hairline
+    const double d = player.duration() > 0 ? player.duration() : (tr ? tr->duration : 0);
+    if (tr && d > 0 && st != Player::Idle) g.fillRect(28, kHintY - 1, float((W - 56) * std::clamp(player.position() / d, 0.0, 1.0)), 3, t.accent);
 
-    // transport
-    const float cx = W / 2 + 40, cy = y + 38;
-    g.icon("prev", cx - 72, cy, 22, Col::onSurface);
-    g.fillCircle(cx, cy, 26, Col::primary);
-    g.icon(st == Player::Playing ? "pause" : "play", cx + (st == Player::Playing ? 0 : 2), cy, 22, Col::onPrimary);
-    g.icon("next", cx + 72, cy, 22, Col::onSurface);
-    g.text("ZL", cx - 72, cy + 18, 11, Col::onSurfaceVariant, 0, Align::Center, true);
-    g.text("+", cx, cy + 26, 11, Col::onSurfaceVariant, 0, Align::Center, true);
-    g.text("ZR", cx + 72, cy + 18, 11, Col::onSurfaceVariant, 0, Align::Center, true);
-    if (lib.shuffle) g.icon("shuffle", cx - 136, cy, 18, Col::primary);
-    if (lib.repeat) { g.icon("repeat", cx + 136, cy, 18, Col::primary); if (lib.repeat == 2) g.text("1", cx + 136, cy - 7, 11, Col::primary, 0, Align::Center, true); }
-
-    // volume
-    const float vx = x + w - 180;
-    g.text("Vol", vx, y + 26, 14, Col::onSurfaceVariant);
-    g.fillRound(vx + 36, y + 33, 110, 6, 3, Col::outline);
-    g.fillRound(vx + 36, y + 33, 110 * player.volume() / 100.f, 6, 3, Col::tertiary);
-    g.text(std::to_string(player.volume()), vx + 154, y + 26, 14, Col::onSurfaceVariant);
-    g.text("R-stick \xE2\x86\x95 vol \xC2\xB7 \xE2\x86\x94 seek", vx, y + 48, 12, Col::onSurfaceVariant);
-
-    // progress
-    const double d = player.duration() > 0 ? player.duration() : (t ? t->duration : 0);
-    const double pos = st == Player::Idle ? 0 : player.position();
-    const float bx = x + 94, bw = w - 94 - 200, by = y + kBarH - 18;
-    g.text(fmtTime(pos), bx, by - 8, 12, Col::onSurfaceVariant);
-    g.text(fmtTime(d), bx + bw, by - 8, 12, Col::onSurfaceVariant, 0, Align::Right);
-    const float px0 = bx + 40, pw = bw - 80;
-    g.fillRound(px0, by - 1, pw, 4, 2, Col::outline);
-    if (st != Player::Idle) g.fillRound(px0, by - 1, float(pw * std::clamp(player.buffered(), 0.0, 1.0)), 4, 2, Col::alpha(Col::secondary, 90));
-    if (d > 0) {
-        const float f = float(std::clamp(pos / d, 0.0, 1.0));
-        g.fillRound(px0, by - 1, pw * f, 4, 2, Col::primary);
-        g.fillCircle(px0 + pw * f, by + 1, 6, Col::primary);
+    // button guide, right to left
+    float x = W - 40;
+    auto hint = [&](const std::string &btn, const std::string &label) {
+        x -= g.measure(label, 17) ;
+        g.text(label, x, y + 10, 17, t.text);
+        x -= 8;
+        const int bw = std::max(26, g.measure(btn, 14, true) + 14);
+        x -= float(bw);
+        g.badge(btn, x, y + 9, t.text, t.bg);
+        x -= 26;
+    };
+    if (!menu.empty()) { hint("B", "Close"); hint("A", "OK"); return; }
+    if (focus == 1) { hint("B", "Back"); hint("A", "Open"); hint("Y", "Search"); return; }
+    hint("+", st == Player::Playing ? "Pause" : "Play");
+    hint("Y", "Search");
+    hint("\xE2\x88\x92", "Options");
+    auto rs = rows();
+    const int s = sel[int(view)];
+    if (!rs.empty() && s < int(rs.size())) {
+        const Row &r = rs[size_t(s)];
+        if (r.kind == Row::Song) hint("X", lib.isLiked(r.t.vid) ? "Unlike" : "Like");
+        hint("A", r.kind == Row::Song ? "Play" : r.kind == Row::Action ? "Select" : "Open");
     }
 }
 
 void App::drawMenu() {
     if (menu.empty()) return;
-    g.fillRect(0, 0, W, H, SDL_Color{3, 3, 16, 170});
+    const Theme &t = TH();
+    g.fillRect(0, 0, W, H, t.dim);
     const int vis = std::min(int(menu.size()), kMenuVisible);
-    const float mh = 64 + vis * 52.f;
-    const float mx = (W - 560) / 2, my = (H - mh) / 2;
-    g.fillRound(mx, my, 560, mh, 24, Col::surfaceVariant);
-    g.strokeRound(mx, my, 560, mh, 24, 1, Col::outline);
-    g.text(menuTitle, mx + 28, my + 20, 18, Col::secondary, 500, Align::Left, true);
-    if (int(menu.size()) > vis) {   // scroll hint
-        g.text(std::to_string(menuSel + 1) + "/" + std::to_string(menu.size()), mx + 532, my + 22, 14, Col::onSurfaceVariant, 0, Align::Right);
-        const float bh = vis * 52.f * vis / menu.size(), by = my + 60 + (vis * 52.f - bh) * menuTop / float(menu.size() - vis);
-        g.fillRound(mx + 550, by, 4, bh, 2, Col::outline);
+    const float mh = 84 + vis * 54.f, mw = 620;
+    const float mx = (W - mw) / 2, my = (H - mh) / 2;
+    g.shadow(mx, my, mw, mh, 28, 16, 120);
+    g.fillRound(mx, my, mw, mh, 28, t.panel);
+    g.text(menuTitle, mx + mw / 2, my + 22, 19, t.text, int(mw - 60), Align::Center, true);
+    g.fillRect(mx + 24, my + 64, mw - 48, 1, t.line);
+    if (int(menu.size()) > vis) {
+        const float bh = vis * 54.f * vis / menu.size(), by = my + 72 + (vis * 54.f - bh) * menuTop / float(menu.size() - vis);
+        g.fillRound(mx + mw - 14, by, 4, bh, 2, t.line);
     }
     for (int i = menuTop; i < menuTop + vis; ++i) {
-        const float iy = my + 60 + (i - menuTop) * 52;
+        const float iy = my + 72 + (i - menuTop) * 54;
         const bool on = i == menuSel;
-        if (on) g.fillRound(mx + 12, iy, 536, 48, 14, Col::outline);
-        g.text(menu[size_t(i)].label, mx + 30, iy + 13, 19, menu[size_t(i)].danger ? Col::error : Col::onSurface, 480, Align::Left, on);
+        if (on) {
+            g.fillRound(mx + 18, iy + 2, mw - 36, 48, 14, t.panelHi);
+            g.rainbowRing(mx + 16, iy, mw - 32, 52, 16, 4, clock);
+        }
+        g.text(menu[size_t(i)].label, mx + mw / 2, iy + 13, 19, menu[size_t(i)].danger ? t.danger : t.text, int(mw - 80), Align::Center, on);
     }
 }
 
+// Notification pill, top right under the clock
 void App::drawToast() {
     if (toastT <= 0 || toastText.empty()) return;
-    const int tw = std::min(760, g.measure(toastText, 17) + 48);
-    const float x = kCX + (kCW - tw) / 2, y = kBarY - 60;
-    const Uint8 a = Uint8(255 * std::min(1.f, toastT * 3));
-    g.fillRound(x, y, float(tw), 42, 21, Col::alpha(Col::surfaceVariant, a));
-    g.strokeRound(x, y, float(tw), 42, 21, 1, Col::alpha(Col::primary, a));
-    g.text(toastText, x + tw / 2.f, y + 11, 17, Col::alpha(Col::onSurface, a), tw - 32, Align::Center);
+    const Theme &t = TH();
+    const int tw = std::min(700, g.measure(toastText, 16) + 48);
+    const float slide = std::min(1.f, (3.0f - toastT) * 6) * std::min(1.f, toastT * 4);
+    const float x = W - 40 - tw * slide, y = 92;
+    g.shadow(x, y, float(tw), 46, 23, 8, 80);
+    g.fillRound(x, y, float(tw), 46, 23, t.panelHi);
+    g.text(toastText, x + 24, y + 13, 16, t.text, tw - 40);
 }

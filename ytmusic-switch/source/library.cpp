@@ -44,6 +44,7 @@ void Library::load() {
     volume = std::clamp(o.value("volume", 80), 0, 100);
     shuffle = o.value("shuffle", false);
     repeat = std::clamp(o.value("repeat", 0), 0, 2);
+    dark = o.value("dark", true);
     rebuild();
 }
 
@@ -59,6 +60,7 @@ void Library::save() {
     o["volume"] = volume;
     o["shuffle"] = shuffle;
     o["repeat"] = repeat;
+    o["dark"] = dark;
     mkdirs(Paths::root());
     const std::string tmp = Paths::state() + ".tmp";
     {

@@ -18,6 +18,7 @@ public:
     int volume = 80;
     bool shuffle = false;
     int repeat = 0;   // 0 off, 1 all, 2 one
+    bool dark = true; // theme
 
     void load();
     void save();

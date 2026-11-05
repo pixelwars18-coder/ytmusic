@@ -21,6 +21,14 @@ constexpr SDL_Color primary{0xff, 0xf5, 0x9b, 255}, onPrimary{0x0e, 0x0e, 0x43, 
 inline SDL_Color alpha(SDL_Color c, Uint8 a) { c.a = a; return c; }
 }
 
+// Console-style themes (basic dark / basic light), like the system menus
+struct Theme {
+    SDL_Color bg, panel, panelHi, text, sub, line, accent, onAccent, dim, danger;
+};
+const Theme &TH();
+void setDarkTheme(bool dark);
+bool darkTheme();
+
 enum class Align { Left, Center, Right };
 
 class Gfx {
@@ -39,6 +47,9 @@ public:
     int text(const std::string &s, float x, float y, int size, SDL_Color c, int maxW = 0, Align a = Align::Left, bool bold = false);
     int measure(const std::string &s, int size, bool bold = false);
     void image(SDL_Texture *t, float x, float y, float w, float h, float rad = 0);   // cover-fit, rounded corners via mask
+    // animated multicolour selection ring (the console's highlight), `phase` in seconds
+    void rainbowRing(float x, float y, float w, float h, float rad, float t, float phase);
+    void shadow(float x, float y, float w, float h, float rad, float spread, Uint8 alpha);
     void endFrame();   // evicts unused cached text
 
     // glyphs drawn with primitives (no icon font needed)

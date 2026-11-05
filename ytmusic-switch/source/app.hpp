@@ -33,10 +33,12 @@ public:
     void shutdown();
     // platform hook: on-screen keyboard. Returns false if cancelled.
     std::function<bool(const std::string &guide, const std::string &initial, std::string &out)> keyboard;
+    std::function<int()> battery;   // percent, or -1
 
     // dev/test hooks
     void testSearch(const std::string &q) { runSearch(q); }
-    void testView(int v) { view = View(v); }
+    void testView(int v) { view = View(v); tabSel = v; }
+    void testFocusTabs() { focus = 1; tabSel = int(view); }
     void testPlay(const Track &t) { playTracks({t}, 0, false); }
     int testState() const { return int(player.state()); }
     double testPos() const { return player.position(); }
@@ -81,13 +83,13 @@ private:
     void ensureVisible();
 
     // drawing
-    void drawSidebar();
-    void drawHeader();
+    void drawTopBar();
+    void drawTiles();
     void drawList();
-    void drawPlayerBar();
+    void drawTabs();
+    void drawHints();
     void drawMenu();
     void drawToast();
-    void drawRowSong(const Row &r, float y, bool sel);
 
     Gfx g;
     Thumbs thumbs;
@@ -97,7 +99,12 @@ private:
 
     View view = View::Search;
     int sel[int(View::Count)] = {};
-    float scroll[int(View::Count)] = {};
+    float scroll[int(View::Count)] = {};       // target scroll (px)
+    float scrollShown[int(View::Count)] = {};  // animated toward `scroll`
+    int focus = 0;                             // 0: tiles / list, 1: section buttons
+    int tabSel = 0;
+    float clock = 0, toastVol = 0;
+    float touchLastX = 0;
     std::string openPlaylist;   // Playlists view: opened playlist id
     int playlistsSel = 0;       // selection to return to
 
