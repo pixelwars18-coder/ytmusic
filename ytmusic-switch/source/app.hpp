@@ -37,6 +37,9 @@ public:
     // dev/test hooks
     void testSearch(const std::string &q) { runSearch(q); }
     void testView(int v) { view = View(v); }
+    void testPlay(const Track &t) { playTracks({t}, 0, false); }
+    int testState() const { return int(player.state()); }
+    double testPos() const { return player.position(); }
 
 private:
     enum class View { Search, Queue, Liked, Playlists, Downloads, Settings, Count };

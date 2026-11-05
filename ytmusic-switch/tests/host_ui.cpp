@@ -55,6 +55,10 @@ int main(int argc, char **argv) {
     app.testView(1);                       // queue
     run(1);
     shot(r, surf, "ui-queue.png");
+    app.testPlay({"dQw4w9WgXcQ", "Rick Astley - Never Gonna Give You Up", "Rick Astley", 213});
+    run(5);
+    printf("app play path: state=%d pos=%.1f (2 = Playing)\n", app.testState(), app.testPos());
+    shot(r, surf, "ui-playing.png");
     app.testView(5);                       // settings
     run(0.3f);
     shot(r, surf, "ui-settings.png");
