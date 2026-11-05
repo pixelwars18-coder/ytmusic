@@ -8,32 +8,18 @@
 
 static SDL_Vertex vtx(float x, float y, SDL_Color c) { return SDL_Vertex{{x, y}, c, {0, 0}}; }
 
-static const Theme kDark{{0x26, 0x27, 0x2b, 255}, {0x34, 0x35, 0x3a, 255}, {0x43, 0x44, 0x4a, 255}, {0xff, 0xff, 0xff, 255},
-                         {0xa8, 0xaa, 0xb0, 255}, {0x4a, 0x4b, 0x52, 255}, {0x2d, 0xc8, 0xf0, 255}, {0x0b, 0x1e, 0x26, 255},
-                         {0x00, 0x00, 0x00, 170}, {0xff, 0x5a, 0x5f, 255}};
-static const Theme kLight{{0xeb, 0xeb, 0xed, 255}, {0xff, 0xff, 0xff, 255}, {0xf3, 0xf3, 0xf5, 255}, {0x2d, 0x2d, 0x30, 255},
-                          {0x70, 0x71, 0x78, 255}, {0xcf, 0xd0, 0xd5, 255}, {0x00, 0x8f, 0xd6, 255}, {0xff, 0xff, 0xff, 255},
-                          {0x20, 0x20, 0x28, 120}, {0xe0, 0x30, 0x3a, 255}};
+// Original Switch system themes: Basic Black (grey #2d2d2d, turquoise accent) and Basic White (blue accent).
+static const Theme kDark{{0x2d, 0x2d, 0x2d, 255}, {0x3b, 0x3b, 0x3b, 255}, {0x46, 0x46, 0x46, 255}, {0xff, 0xff, 0xff, 255},
+                         {0xa0, 0xa0, 0xa0, 255}, {0x5a, 0x5a, 0x5a, 255}, {0x00, 0xff, 0xc8, 255}, {0x10, 0x2d, 0x28, 255},
+                         {0x00, 0x00, 0x00, 170}, {0xff, 0x4b, 0x4b, 255}};
+static const Theme kLight{{0xeb, 0xeb, 0xeb, 255}, {0xff, 0xff, 0xff, 255}, {0xf5, 0xf5, 0xf5, 255}, {0x2d, 0x2d, 0x2d, 255},
+                          {0x6e, 0x6e, 0x6e, 255}, {0xcd, 0xcd, 0xcd, 255}, {0x32, 0x50, 0xf0, 255}, {0xff, 0xff, 0xff, 255},
+                          {0x28, 0x28, 0x28, 120}, {0xe6, 0x28, 0x32, 255}};
 static bool gDark = true;
 const Theme &TH() { return gDark ? kDark : kLight; }
 void setDarkTheme(bool d) { gDark = d; }
 bool darkTheme() { return gDark; }
 
-static SDL_Color hsv(float h, float s, float v, Uint8 a = 255) {
-    h = std::fmod(h, 1.f);
-    if (h < 0) h += 1;
-    const float i = std::floor(h * 6), f = h * 6 - i, p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
-    float r, g, b;
-    switch (int(i) % 6) {
-    case 0: r = v; g = t; b = p; break;
-    case 1: r = q; g = v; b = p; break;
-    case 2: r = p; g = v; b = t; break;
-    case 3: r = p; g = q; b = v; break;
-    case 4: r = t; g = p; b = v; break;
-    default: r = v; g = p; b = q; break;
-    }
-    return SDL_Color{Uint8(r * 255), Uint8(g * 255), Uint8(b * 255), a};
-}
 
 bool Gfx::init(SDL_Renderer *rr, const std::vector<FontBlob> &f) {
     r = rr;
@@ -157,8 +143,12 @@ void Gfx::rainbowRing(float x, float y, float w, float h, float rad, float t, fl
     x *= sc; y *= sc; w *= sc; h *= sc; rad *= sc; t *= sc;
     // (x,y,w,h,rad) is the outer edge of the ring; the band is t wide going inwards
     rad = std::min({rad, w / 2, h / 2});
-    const float pulse = 0.5f + 0.5f * std::sin(phase * 3.2f);
-    ring(x, y, w, h, rad, rad, rad - t, [&](int k, int n) { return hsv(float(k) / n + phase * 0.12f, 0.62f, 1.0f, Uint8(200 + 55 * pulse)); });
+    // the original console's cursor: a border that pulses between two accent shades
+    const float pulse = 0.5f + 0.5f * std::sin(phase * 4.0f);
+    const SDL_Color a = gDark ? SDL_Color{0x00, 0xff, 0xdc, 255} : SDL_Color{0x00, 0xc3, 0xe3, 255};
+    const SDL_Color b = gDark ? SDL_Color{0x14, 0x9b, 0xe6, 255} : SDL_Color{0x28, 0x46, 0xe6, 255};
+    const SDL_Color c{Uint8(a.r + (b.r - a.r) * pulse), Uint8(a.g + (b.g - a.g) * pulse), Uint8(a.b + (b.b - a.b) * pulse), 255};
+    ring(x, y, w, h, rad, rad, rad - t, [c](int, int) { return c; });
 }
 
 // Soft drop shadow: a few expanding translucent rounded rects.

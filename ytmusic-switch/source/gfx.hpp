@@ -53,7 +53,7 @@ public:
     int text(const std::string &s, float x, float y, int size, SDL_Color c, int maxW = 0, Align a = Align::Left, bool bold = false);
     int measure(const std::string &s, int size, bool bold = false);
     void image(SDL_Texture *t, float x, float y, float w, float h, float rad = 0);   // cover-fit, rounded corners via mask
-    // animated multicolour selection ring (the console's highlight), `phase` in seconds
+    // selection cursor: pulsing accent border (the original console's highlight), `phase` in seconds
     void rainbowRing(float x, float y, float w, float h, float rad, float t, float phase);
     void shadow(float x, float y, float w, float h, float rad, float spread, Uint8 alpha);
     void endFrame();   // evicts unused cached text

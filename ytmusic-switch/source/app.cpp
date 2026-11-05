@@ -87,7 +87,7 @@ std::vector<App::Row> App::rows() {
         act("Clear recent searches", std::to_string(lib.history.size()) + " saved", "clearhist");
         act("Shuffle: " + std::string(lib.shuffle ? "on" : "off"), "Play the queue in random order", "shuffle");
         act(std::string("Repeat: ") + (lib.repeat == 0 ? "off" : lib.repeat == 1 ? "all" : "one"), "What happens at the end of the queue", "repeat");
-        act(std::string("Theme: ") + (lib.dark ? "Basic Dark" : "Basic Light"), "Switch between the dark and light look", "theme");
+        act(std::string("Theme: ") + (lib.dark ? "Basic Black" : "Basic White"), "Switch between the dark and light look", "theme");
         act("Controls", "A play · X like · Y search · \xE2\x88\x92 menu · + play/pause (hold: exit) · ZL/ZR prev/next · R-stick seek/volume", "help");
         act("Exit", "Saves and closes YT Music", "exit");
         return v;
