@@ -18,11 +18,13 @@ jobs:
           dkp-pacman -Qq | grep '^switch-' > /tmp/pkgs.txt || true
       - name: Build
         working-directory: ytmusic-switch
+        shell: bash
         run: |
           set -o pipefail
           make -j4 2>&1 | tee /tmp/build.log
       - name: Publish result
         if: always()
+        shell: bash
         run: |
           git config --global --add safe.directory '*'
           sha=$(git rev-parse --short HEAD)
