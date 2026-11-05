@@ -12,6 +12,7 @@ constexpr int kMenuVisible = 10;
 const char *kViewNames[] = {"Search", "Queue", "Liked", "Playlists", "Downloads", "Settings"};
 const char *kViewIcons[] = {"search", "queue", "heart", "list", "download", "gear"};
 std::mt19937 &rng() { static std::mt19937 r{std::random_device{}()}; return r; }
+std::string songs(size_t n) { return std::to_string(n) + (n == 1 ? " song" : " songs"); }
 bool fresh(const YT::Stream &s) { return s.ok() && (s.expires == 0 || s.expires - nowSecs() > 600); }
 }
 
@@ -600,12 +601,12 @@ void App::drawSidebar() {
 void App::drawHeader() {
     std::string title = kViewNames[int(view)], sub;
     if (view == View::Search) {
-        if (!query.empty() && !results.empty()) { title = query; sub = std::to_string(results.size()) + " songs" + (continuation.empty() ? "" : " \xC2\xB7 scroll for more"); }
+        if (!query.empty() && !results.empty()) { title = query; sub = songs(results.size()) + (continuation.empty() ? "" : " \xC2\xB7 scroll for more"); }
         else if (results.empty()) sub = lib.history.empty() ? "Press Y to search" : "Recent searches";
-    } else if (view == View::Queue) sub = lib.queue.empty() ? "Nothing queued" : std::to_string(lib.queue.size()) + " songs" + (lib.shuffle ? " \xC2\xB7 shuffle" : "") + (lib.repeat == 1 ? " \xC2\xB7 repeat all" : lib.repeat == 2 ? " \xC2\xB7 repeat one" : "");
-    else if (view == View::Liked) sub = std::to_string(lib.liked.size()) + " songs";
+    } else if (view == View::Queue) sub = lib.queue.empty() ? "Nothing queued" : songs(lib.queue.size()) + (lib.shuffle ? " \xC2\xB7 shuffle" : "") + (lib.repeat == 1 ? " \xC2\xB7 repeat all" : lib.repeat == 2 ? " \xC2\xB7 repeat one" : "");
+    else if (view == View::Liked) sub = songs(lib.liked.size());
     else if (view == View::Playlists) {
-        if (Playlist *p = lib.find(openPlaylist)) { title = p->name; sub = std::to_string(p->tracks.size()) + " songs \xC2\xB7 B to go back"; }
+        if (Playlist *p = lib.find(openPlaylist)) { title = p->name; sub = songs(p->tracks.size()) + " \xC2\xB7 B to go back"; }
         else sub = std::to_string(lib.playlists.size()) + " playlists";
     } else if (view == View::Downloads) {
         const int p = dl.pending();
@@ -632,7 +633,7 @@ void App::drawRowSong(const Row &r, float y, bool selected) {
     else g.icon("music", x + 66, y + 40, 22, Col::outline);
     if (playing) {
         g.fillRound(x + 10, y + 8, 112, 63, 10, SDL_Color{8, 8, 32, 170});
-        g.icon(player.state() == Player::Paused ? "pause" : "play", x + 66, y + 40, 22, Col::primary);
+        g.icon(player.state() == Player::Paused ? "play" : "music", x + 66, y + 40, 22, Col::primary);
     }
     // download badge on the thumbnail
     if (dl.isDownloaded(r.t.vid)) {
