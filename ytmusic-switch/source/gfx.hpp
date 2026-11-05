@@ -4,6 +4,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <deque>
+#include <functional>
 #include <list>
 #include <map>
 #include <tuple>
@@ -39,6 +40,11 @@ public:
     void shutdown();
     SDL_Renderer *r = nullptr;
 
+    // All coordinates are in a 1280x720 logical space; setScale maps them to the real output (1.5 when docked at 1080p).
+    void setScale(float s);
+    float scale() const { return sc; }
+    void clip(float x, float y, float w, float h);
+    void unclip();
     void fillRect(float x, float y, float w, float h, SDL_Color c);
     void fillRound(float x, float y, float w, float h, float rad, SDL_Color c);
     void strokeRound(float x, float y, float w, float h, float rad, float t, SDL_Color c);
@@ -59,6 +65,8 @@ public:
 
 private:
     TTF_Font *font(int size, bool bold, int which = 0);
+    void ring(float x, float y, float w, float h, float rad, float rOut, float rIn, const std::function<SDL_Color(int, int)> &col);
+    float sc = 1;
     std::string pickFont(const std::string &s, int size, bool bold, int &which);
     struct Cached { SDL_Texture *tex; int w, h; unsigned frame; };
     std::unordered_map<std::string, Cached> cache;

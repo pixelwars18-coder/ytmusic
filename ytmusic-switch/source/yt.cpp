@@ -250,6 +250,6 @@ std::string videoIdFromText(const std::string &s) {
     return {};
 }
 
-std::string thumbUrl(const std::string &vid) { return "https://i.ytimg.com/vi/" + vid + "/hqdefault.jpg"; }
+std::string thumbUrl(const std::string &vid, bool large) { return "https://i.ytimg.com/vi/" + vid + (large ? "/sddefault.jpg" : "/hqdefault.jpg"); }
 
 } // namespace YT

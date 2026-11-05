@@ -33,5 +33,5 @@ std::vector<Track> radio(const std::string &vid);
 // Extracts a video id from a pasted link or returns empty.
 std::string videoIdFromText(const std::string &text);
 
-std::string thumbUrl(const std::string &vid);   // 480x360 (16:9 picture letterboxed)
+std::string thumbUrl(const std::string &vid, bool large = false);   // 480x360, large: 640x480 (16:9 picture letterboxed)
 }

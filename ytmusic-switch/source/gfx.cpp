@@ -4,6 +4,7 @@
 #include <SDL2/SDL_image.h>
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 static SDL_Vertex vtx(float x, float y, SDL_Color c) { return SDL_Vertex{{x, y}, c, {0, 0}}; }
 
@@ -63,78 +64,101 @@ TTF_Font *Gfx::font(int size, bool bold, int which) {
 
 void Gfx::fillRect(float x, float y, float w, float h, SDL_Color c) {
     SDL_SetRenderDrawColor(r, c.r, c.g, c.b, c.a);
-    SDL_FRect fr{x, y, w, h};
+    SDL_FRect fr{x * sc, y * sc, w * sc, h * sc};
     SDL_RenderFillRectF(r, &fr);
 }
 
-// Rounded rectangle as one triangle fan (corners: 8 segments each)
-void Gfx::fillRound(float x, float y, float w, float h, float rad, SDL_Color c) {
-    rad = std::min({rad, w / 2, h / 2});
-    if (rad < 1) { fillRect(x, y, w, h, c); return; }
-    std::vector<SDL_Vertex> v;
-    std::vector<int> idx;
-    v.push_back(vtx(x + w / 2, y + h / 2, c));
+void Gfx::clip(float x, float y, float w, float h) {
+    SDL_Rect cr{int(x * sc), int(y * sc), int(w * sc + 0.5f), int(h * sc + 0.5f)};
+    SDL_RenderSetClipRect(r, &cr);
+}
+void Gfx::unclip() { SDL_RenderSetClipRect(r, nullptr); }
+
+// Outline of a rounded rect as (corner centre, unit direction) samples, counter-clockwise from the right edge.
+// Everything below is in device pixels. Edges get a 1 px feathered fringe (alpha 0 outside), which is what
+// makes curves smooth: SDL's geometry renderer doesn't anti-alias.
+namespace {
+struct Sample { float cx, cy, dx, dy; };
+std::vector<Sample> outline(float x, float y, float w, float h, float rad) {
     const float cx[4] = {x + w - rad, x + rad, x + rad, x + w - rad}, cy[4] = {y + rad, y + rad, y + h - rad, y + h - rad};
-    const int seg = rad > 12 ? 10 : 6;
+    const int seg = std::clamp(int(rad / 2.2f), 3, 24);
+    std::vector<Sample> v;
+    v.reserve(size_t(4 * (seg + 1)));
     for (int q = 0; q < 4; ++q)
         for (int i = 0; i <= seg; ++i) {
             const float a = float(M_PI) / 2 * (q + float(i) / seg);
-            v.push_back(vtx(cx[q] + std::cos(a) * rad, cy[q] - std::sin(a) * rad, c));
+            v.push_back({cx[q], cy[q], std::cos(a), -std::sin(a)});
         }
-    const int n = int(v.size()) - 1;
-    for (int i = 1; i <= n; ++i) { idx.push_back(0); idx.push_back(i); idx.push_back(i % n + 1); }
+    return v;
+}
+constexpr float kFringe = 1.0f;
+}
+
+void Gfx::fillRound(float x, float y, float w, float h, float rad, SDL_Color c) {
+    x *= sc; y *= sc; w *= sc; h *= sc; rad *= sc;
+    rad = std::min({rad, w / 2, h / 2});
+    if (rad < 0.5f) rad = 0.5f;
+    const auto o = outline(x, y, w, h, rad);
+    const int n = int(o.size());
+    SDL_Color c0 = c;
+    c0.a = 0;
+    const float rin = std::max(0.f, rad - kFringe / 2), rout = rad + kFringe / 2;
+    std::vector<SDL_Vertex> v;
+    std::vector<int> idx;
+    v.reserve(size_t(1 + 2 * n));
+    v.push_back(vtx(x + w / 2, y + h / 2, c));
+    for (const Sample &p : o) {
+        v.push_back(vtx(p.cx + p.dx * rin, p.cy + p.dy * rin, c));
+        v.push_back(vtx(p.cx + p.dx * rout, p.cy + p.dy * rout, c0));
+    }
+    for (int i = 0; i < n; ++i) {
+        const int a = 1 + 2 * i, b = 1 + 2 * ((i + 1) % n);
+        idx.insert(idx.end(), {0, a, b, a, a + 1, b, b, a + 1, b + 1});
+    }
+    SDL_RenderGeometry(r, nullptr, v.data(), int(v.size()), idx.data(), int(idx.size()));
+}
+
+// band between radii rIn..rOut around the corner centres of (x,y,w,h,rad), colour per sample
+void Gfx::ring(float x, float y, float w, float h, float rad, float rOut, float rIn, const std::function<SDL_Color(int, int)> &col) {
+    const auto o = outline(x, y, w, h, rad);
+    const int n = int(o.size());
+    rIn = std::max(0.f, rIn);
+    std::vector<SDL_Vertex> v;
+    std::vector<int> idx;
+    v.reserve(size_t(4 * n));
+    for (int i = 0; i < n; ++i) {
+        const Sample &p = o[size_t(i)];
+        const SDL_Color c = col(i, n);
+        SDL_Color c0 = c;
+        c0.a = 0;
+        const float radii[4] = {rOut + kFringe / 2, rOut - kFringe / 2, rIn + kFringe / 2, std::max(0.f, rIn - kFringe / 2)};
+        v.push_back(vtx(p.cx + p.dx * radii[0], p.cy + p.dy * radii[0], c0));
+        v.push_back(vtx(p.cx + p.dx * radii[1], p.cy + p.dy * radii[1], c));
+        v.push_back(vtx(p.cx + p.dx * radii[2], p.cy + p.dy * radii[2], c));
+        v.push_back(vtx(p.cx + p.dx * radii[3], p.cy + p.dy * radii[3], c0));
+    }
+    for (int i = 0; i < n; ++i) {
+        const int a = 4 * i, b = 4 * ((i + 1) % n);
+        for (int k = 0; k < 3; ++k) idx.insert(idx.end(), {a + k, a + k + 1, b + k, b + k, a + k + 1, b + k + 1});
+    }
     SDL_RenderGeometry(r, nullptr, v.data(), int(v.size()), idx.data(), int(idx.size()));
 }
 
 void Gfx::strokeRound(float x, float y, float w, float h, float rad, float t, SDL_Color c) {
-    // ring between two rounded outlines
+    x *= sc; y *= sc; w *= sc; h *= sc; rad *= sc; t *= sc;
     rad = std::min({rad, w / 2, h / 2});
-    const float ri = std::max(0.f, rad - t);
-    std::vector<SDL_Vertex> v;
-    std::vector<int> idx;
-    const float cx[4] = {x + w - rad, x + rad, x + rad, x + w - rad}, cy[4] = {y + rad, y + rad, y + h - rad, y + h - rad};
-    const int seg = 8;
-    for (int q = 0; q < 4; ++q)
-        for (int i = 0; i <= seg; ++i) {
-            const float a = float(M_PI) / 2 * (q + float(i) / seg);
-            const float ca = std::cos(a), sa = std::sin(a);
-            v.push_back(vtx(cx[q] + ca * rad, cy[q] - sa * rad, c));
-            v.push_back(vtx(cx[q] + ca * ri, cy[q] - sa * ri, c));
-        }
-    const int n = int(v.size()) / 2;
-    for (int i = 0; i < n; ++i) {
-        const int a = 2 * i, b = 2 * ((i + 1) % n);
-        idx.insert(idx.end(), {a, a + 1, b, b, a + 1, b + 1});
-    }
-    SDL_RenderGeometry(r, nullptr, v.data(), int(v.size()), idx.data(), int(idx.size()));
+    ring(x, y, w, h, rad, rad, rad - t, [c](int, int) { return c; });
 }
 
 void Gfx::fillCircle(float cx, float cy, float rad, SDL_Color c) { fillRound(cx - rad, cy - rad, rad * 2, rad * 2, rad, c); }
 
-// Ring around a rounded rect whose colour runs through the spectrum along the outline and slowly rotates.
+// Ring outside a rounded rect whose colour runs through the spectrum along the outline and slowly rotates.
 void Gfx::rainbowRing(float x, float y, float w, float h, float rad, float t, float phase) {
+    x *= sc; y *= sc; w *= sc; h *= sc; rad *= sc; t *= sc;
+    // (x,y,w,h,rad) is the outer edge of the ring; the band is t wide going inwards
     rad = std::min({rad, w / 2, h / 2});
     const float pulse = 0.5f + 0.5f * std::sin(phase * 3.2f);
-    const float outR = rad + t, inR = rad;
-    std::vector<SDL_Vertex> v;
-    std::vector<int> idx;
-    const float cx[4] = {x + w - rad, x + rad, x + rad, x + w - rad}, cy[4] = {y + rad, y + rad, y + h - rad, y + h - rad};
-    const int seg = 10;
-    const int n = 4 * (seg + 1);
-    for (int q = 0; q < 4; ++q)
-        for (int i = 0; i <= seg; ++i) {
-            const int k = q * (seg + 1) + i;
-            const float a = float(M_PI) / 2 * (q + float(i) / seg);
-            const float ca = std::cos(a), sa = std::sin(a);
-            const SDL_Color c = hsv(float(k) / n + phase * 0.12f, 0.62f, 1.0f, Uint8(200 + 55 * pulse));
-            v.push_back(vtx(cx[q] + ca * outR, cy[q] - sa * outR, c));
-            v.push_back(vtx(cx[q] + ca * inR, cy[q] - sa * inR, c));
-        }
-    for (int i = 0; i < n; ++i) {
-        const int a = 2 * i, b = 2 * ((i + 1) % n);
-        idx.insert(idx.end(), {a, a + 1, b, b, a + 1, b + 1});
-    }
-    SDL_RenderGeometry(r, nullptr, v.data(), int(v.size()), idx.data(), int(idx.size()));
+    ring(x, y, w, h, rad, rad, rad - t, [&](int k, int n) { return hsv(float(k) / n + phase * 0.12f, 0.62f, 1.0f, Uint8(200 + 55 * pulse)); });
 }
 
 // Soft drop shadow: a few expanding translucent rounded rects.
@@ -217,15 +241,20 @@ std::string Gfx::pickFont(const std::string &s, int size, bool bold, int &which)
     return trimmed;
 }
 
-int Gfx::measure(const std::string &s0, int size, bool bold) {
+int Gfx::measure(const std::string &s0, int size0, bool bold) {
+    const int size = std::max(6, int(std::lround(size0 * sc)));   // fonts are rasterised at device resolution
     int w = 0, which = 0;
     const std::string s = pickFont(s0, size, bold, which);
     if (TTF_Font *f = font(size, bold, which)) TTF_SizeUTF8(f, s.c_str(), &w, nullptr);
-    return w;
+    return int(std::lround(w / sc));
 }
 
-int Gfx::text(const std::string &s0, float x, float y, int size, SDL_Color c, int maxW, Align a, bool bold) {
+int Gfx::text(const std::string &s0, float x, float y, int size0, SDL_Color c, int maxW, Align a, bool bold) {
     if (s0.empty()) return 0;
+    const int size = std::max(6, int(std::lround(size0 * sc)));
+    x *= sc;
+    y *= sc;
+    maxW = int(maxW * sc);
     int which = 0;
     const std::string s1 = pickFont(s0, size, bold, which);
     TTF_Font *f = font(size, bold, which);
@@ -250,11 +279,12 @@ int Gfx::text(const std::string &s0, float x, float y, int size, SDL_Color c, in
     else if (a == Align::Right) dx = x - it->second.w;
     SDL_FRect dst{std::round(dx), std::round(y), float(it->second.w), float(it->second.h)};
     SDL_RenderCopyF(r, it->second.tex, nullptr, &dst);
-    return it->second.w;
+    return int(std::lround(it->second.w / sc));
 }
 
 void Gfx::image(SDL_Texture *t, float x, float y, float w, float h, float rad) {
     if (!t) return;
+    x *= sc; y *= sc; w *= sc; h *= sc; rad *= sc;
     int tw, th;
     SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
     // cover-fit crop
@@ -267,24 +297,26 @@ void Gfx::image(SDL_Texture *t, float x, float y, float w, float h, float rad) {
         SDL_RenderCopyF(r, t, &src, &dst);
         return;
     }
-    // textured rounded fan
     rad = std::min({rad, w / 2, h / 2});
+    auto uv = [&](float px, float py) {
+        return SDL_FPoint{(src.x + std::clamp((px - x) / w, 0.f, 1.f) * src.w) / tw, (src.y + std::clamp((py - y) / h, 0.f, 1.f) * src.h) / th};
+    };
+    const auto o = outline(x, y, w, h, rad);
+    const int n = int(o.size());
+    const SDL_Color white{255, 255, 255, 255}, clear{255, 255, 255, 0};
     std::vector<SDL_Vertex> v;
     std::vector<int> idx;
-    auto uv = [&](float px, float py) {
-        return SDL_FPoint{(src.x + (px - x) / w * src.w) / tw, (src.y + (py - y) / h * src.h) / th};
-    };
-    SDL_Color white{255, 255, 255, 255};
     v.push_back(SDL_Vertex{{x + w / 2, y + h / 2}, white, uv(x + w / 2, y + h / 2)});
-    const float cx[4] = {x + w - rad, x + rad, x + rad, x + w - rad}, cy[4] = {y + rad, y + rad, y + h - rad, y + h - rad};
-    for (int q = 0; q < 4; ++q)
-        for (int i = 0; i <= 6; ++i) {
-            const float a = float(M_PI) / 2 * (q + i / 6.f);
-            const float px = cx[q] + std::cos(a) * rad, py = cy[q] - std::sin(a) * rad;
-            v.push_back(SDL_Vertex{{px, py}, white, uv(px, py)});
-        }
-    const int n = int(v.size()) - 1;
-    for (int i = 1; i <= n; ++i) { idx.push_back(0); idx.push_back(i); idx.push_back(i % n + 1); }
+    const float rin = std::max(0.f, rad - kFringe / 2), rout = rad + kFringe / 2;
+    for (const Sample &p : o) {
+        const float ix = p.cx + p.dx * rin, iy = p.cy + p.dy * rin, ox = p.cx + p.dx * rout, oy = p.cy + p.dy * rout;
+        v.push_back(SDL_Vertex{{ix, iy}, white, uv(ix, iy)});
+        v.push_back(SDL_Vertex{{ox, oy}, clear, uv(ox, oy)});
+    }
+    for (int i = 0; i < n; ++i) {
+        const int a = 1 + 2 * i, b = 1 + 2 * ((i + 1) % n);
+        idx.insert(idx.end(), {0, a, b, a, a + 1, b, b, a + 1, b + 1});
+    }
     SDL_RenderGeometry(r, t, v.data(), int(v.size()), idx.data(), int(idx.size()));
 }
 
@@ -297,19 +329,38 @@ void Gfx::endFrame() {
     }
 }
 
+static float gScale = 1;   // set by Gfx::setScale, used by the icon helpers below
+
+// line with feathered sides (logical coordinates)
 static void thickLine(SDL_Renderer *r, float x1, float y1, float x2, float y2, float t, SDL_Color c) {
+    x1 *= gScale; y1 *= gScale; x2 *= gScale; y2 *= gScale; t *= gScale;
     const float dx = x2 - x1, dy = y2 - y1, len = std::sqrt(dx * dx + dy * dy);
     if (len <= 0) return;
-    const float nx = -dy / len * t / 2, ny = dx / len * t / 2;
-    SDL_Vertex v[4] = {vtx(x1 + nx, y1 + ny, c), vtx(x1 - nx, y1 - ny, c), vtx(x2 + nx, y2 + ny, c), vtx(x2 - nx, y2 - ny, c)};
-    int idx[6] = {0, 1, 2, 2, 1, 3};
-    SDL_RenderGeometry(r, nullptr, v, 4, idx, 6);
+    const float ux = -dy / len, uy = dx / len;
+    const float in = std::max(0.f, t / 2 - 0.5f), out = t / 2 + 0.5f;
+    SDL_Color c0 = c;
+    c0.a = 0;
+    SDL_Vertex v[8] = {vtx(x1 + ux * out, y1 + uy * out, c0), vtx(x1 + ux * in, y1 + uy * in, c), vtx(x1 - ux * in, y1 - uy * in, c), vtx(x1 - ux * out, y1 - uy * out, c0),
+                       vtx(x2 + ux * out, y2 + uy * out, c0), vtx(x2 + ux * in, y2 + uy * in, c), vtx(x2 - ux * in, y2 - uy * in, c), vtx(x2 - ux * out, y2 - uy * out, c0)};
+    int idx[18];
+    int k = 0;
+    for (int b = 0; b < 3; ++b) { const int i[6] = {b, b + 1, 4 + b, 4 + b, b + 1, 5 + b}; for (int j : i) idx[k++] = j; }
+    SDL_RenderGeometry(r, nullptr, v, 8, idx, 18);
 }
 
 static void tri(SDL_Renderer *r, float x1, float y1, float x2, float y2, float x3, float y3, SDL_Color c) {
-    SDL_Vertex v[3] = {vtx(x1, y1, c), vtx(x2, y2, c), vtx(x3, y3, c)};
+    const float s = gScale;
+    SDL_Vertex v[3] = {vtx(x1 * s, y1 * s, c), vtx(x2 * s, y2 * s, c), vtx(x3 * s, y3 * s, c)};
     SDL_RenderGeometry(r, nullptr, v, 3, nullptr, 0);
+    // soften the edges with a thin feathered outline
+    SDL_Color c0 = c;
+    c0.a = Uint8(c.a / 2);
+    thickLine(r, x1, y1, x2, y2, 0.8f / s, c0);
+    thickLine(r, x2, y2, x3, y3, 0.8f / s, c0);
+    thickLine(r, x3, y3, x1, y1, 0.8f / s, c0);
 }
+
+void Gfx::setScale(float s) { sc = s > 0 ? s : 1; gScale = sc; }
 
 void Gfx::icon(const std::string &n, float cx, float cy, float s, SDL_Color c) {
     const float h = s / 2, t = std::max(2.f, s / 10);
@@ -403,7 +454,7 @@ void Thumbs::pump() {
     for (auto &[vid, bytes] : got) {
         SDL_Surface *src = bytes.empty() ? nullptr : IMG_Load_RW(SDL_RWFromConstMem(bytes.data(), int(bytes.size())), 1);
         if (!src) continue;
-        // hqdefault is 480x360 with the 16:9 picture letterboxed in the middle: keep a centred square of the picture
+        // sd/hqdefault are 4:3 with the 16:9 picture letterboxed in the middle: keep a centred square of the picture
         const int ph = src->w * 9 / 16, side = std::min(ph, src->h);
         SDL_Rect cr{(src->w - side) / 2, (src->h - side) / 2, side, side};
         SDL_Surface *sq = SDL_CreateRGBSurfaceWithFormat(0, side, side, 32, SDL_PIXELFORMAT_ARGB8888);
@@ -418,7 +469,7 @@ void Thumbs::pump() {
         SDL_SetTextureScaleMode(t, SDL_ScaleModeLinear);
         tex[vid] = t;
         lru.push_front(vid);
-        while (lru.size() > 120) {
+        while (lru.size() > 90) {
             const std::string old = lru.back();
             lru.pop_back();
             SDL_DestroyTexture(tex[old]);
@@ -439,7 +490,8 @@ void Thumbs::worker() {
             vid = want.front();
             want.pop_front();
         }
-        Net::Response res = Net::get(YT::thumbUrl(vid), {}, 15);
+        Net::Response res = Net::get(YT::thumbUrl(vid, true), {}, 15);   // 640x480: sharp on a 1080p TV
+        if (!res.ok()) res = Net::get(YT::thumbUrl(vid), {}, 15);        // not every video has one
         std::lock_guard<std::mutex> l(mu);
         if (res.ok()) ready.emplace_back(vid, std::move(res.body));
         else requested.erase(vid);   // try again later

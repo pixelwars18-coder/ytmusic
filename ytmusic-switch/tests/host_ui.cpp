@@ -75,6 +75,24 @@ int main(int argc, char **argv) {
     run(0.5f);
     shot(r, surf, "ui-light.png");
     setDarkTheme(true);
+    // docked: render the home row at 1920x1080
+    {
+        SDL_Surface *big = SDL_CreateRGBSurfaceWithFormat(0, 1920, 1080, 32, SDL_PIXELFORMAT_ARGB8888);
+        SDL_Renderer *br = SDL_CreateSoftwareRenderer(big);
+        App app2;
+        app2.keyboard = app.keyboard;
+        app2.battery = [] { return 82; };
+        if (app2.init(br, {{font.data(), font.size()}})) {
+            app2.setScale(1.5f);
+            app2.testSearch("daft punk");
+            for (int i = 0; i < 150; ++i) { Input x; x.dt = 1 / 30.f; app2.frame(x); app2.render(); std::this_thread::sleep_for(std::chrono::milliseconds(33)); }
+            Input rt; rt.down = rt.held = B_RIGHT; rt.dt = 1 / 30.f;
+            app2.frame(rt);
+            for (int i = 0; i < 20; ++i) { Input x; x.dt = 1 / 30.f; app2.frame(x); app2.render(); }
+            shot(br, big, "ui-1080p.png");
+            app2.shutdown();
+        }
+    }
     app.shutdown();
     return 0;
 }

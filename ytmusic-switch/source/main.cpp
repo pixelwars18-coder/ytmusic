@@ -33,7 +33,11 @@ int main(int, char **) {
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO);
     TTF_Init();
     IMG_Init(IMG_INIT_JPG | IMG_INIT_PNG);
-    SDL_Window *win = SDL_CreateWindow("YT Music", 0, 0, 1280, 720, 0);
+    // Render at the console's real resolution: 1920x1080 docked, 1280x720 handheld (no upscaling blur)
+    auto docked = [] { return appletGetOperationMode() == AppletOperationMode_Console; };
+    bool wasDocked = docked();
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");   // smooth (linear) texture scaling
+    SDL_Window *win = SDL_CreateWindow("YT Music", 0, 0, wasDocked ? 1920 : 1280, wasDocked ? 1080 : 720, 0);
     SDL_Renderer *ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
@@ -58,6 +62,13 @@ int main(int, char **) {
             bool quit = false;
             while (SDL_PollEvent(&e)) if (e.type == SDL_QUIT) quit = true;
             if (quit) break;
+            if (docked() != wasDocked) {   // docked / undocked while running
+                wasDocked = docked();
+                SDL_SetWindowSize(win, wasDocked ? 1920 : 1280, wasDocked ? 1080 : 720);
+            }
+            int ow = 1280, oh = 720;
+            SDL_GetRendererOutputSize(ren, &ow, &oh);
+            app.setScale(ow / 1280.f);
             padUpdate(&pad);
             const u64 down = padGetButtonsDown(&pad), held = padGetButtons(&pad);
             auto map = [](u64 b) {

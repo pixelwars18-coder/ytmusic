@@ -35,6 +35,7 @@ public:
     std::function<bool(const std::string &guide, const std::string &initial, std::string &out)> keyboard;
     std::function<int()> battery;   // percent, or -1
 
+    void setScale(float s) { g.setScale(s); }   // output size / 1280 (1.5 docked at 1080p)
     // dev/test hooks
     void testSearch(const std::string &q) { runSearch(q); }
     void testView(int v) { view = View(v); tabSel = v; }

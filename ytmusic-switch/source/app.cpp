@@ -679,8 +679,7 @@ void App::drawTiles() {
     }
     const float step = kTile + kGap;
     const int sv = sel[v];
-    SDL_Rect clip{0, int(kTileY - 70), int(W), int(kTile + 140)};
-    SDL_RenderSetClipRect(g.r, &clip);
+    g.clip(0, kTileY - 70, W, kTile + 140);
     const int first = std::max(0, int((scrollShown[v]) / step) - 1);
     for (int i = first; i < int(rs.size()); ++i) {
         const float x = kTileX0 + i * step - scrollShown[v];
@@ -741,7 +740,7 @@ void App::drawTiles() {
         }
         if (on && focus == 0) g.rainbowRing(x - 7, kTileY - 7, kTile + 14, kTile + 14, 32, 5, clock);
     }
-    SDL_RenderSetClipRect(g.r, nullptr);
+    g.unclip();
 
     // the selected item's name above the row, details below (like the home menu)
     if (sv < int(rs.size())) {
@@ -766,8 +765,7 @@ void App::drawList() {
     auto rs = rows();
     const int v = int(view);
     g.fillRound(kListX - 10, kListY - 10, kListW + 20, kListH + 20, 26, t.panel);
-    SDL_Rect clip{int(kListX - 10), int(kListY - 6), int(kListW + 20), int(kListH + 12)};
-    SDL_RenderSetClipRect(g.r, &clip);
+    g.clip(kListX - 10, kListY - 6, kListW + 20, kListH + 12);
     for (int i = 0; i < int(rs.size()); ++i) {
         const float y = kListY + i * kRowH - scrollShown[v];
         if (y > kListY + kListH) break;
@@ -782,7 +780,7 @@ void App::drawList() {
         g.text(r.label, kListX + 30, y + 10, 20, r.id == "exit" ? t.danger : t.text, int(kListW - 60), Align::Left, on);
         g.text(r.sub, kListX + 30, y + 38, 14, t.sub, int(kListW - 60));
     }
-    SDL_RenderSetClipRect(g.r, nullptr);
+    g.unclip();
 }
 
 // Round section buttons in a rounded tray, label under the focused one
