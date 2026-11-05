@@ -22,6 +22,16 @@ jobs:
         run: |
           set -o pipefail
           make -j4 2>&1 | tee /tmp/build.log
+      - name: Host test (real YouTube)
+        if: always()
+        shell: bash
+        working-directory: ytmusic-switch
+        run: |
+          (apt-get update -qq && apt-get install -y -qq g++ pkg-config libcurl4-openssl-dev libavformat-dev libavcodec-dev libswresample-dev libavutil-dev libsdl2-dev) > /tmp/apt.log 2>&1 || tail -20 /tmp/apt.log
+          set -o pipefail
+          { g++ -std=gnu++20 -O1 -o /tmp/host_test tests/host_test.cpp source/yt.cpp source/net.cpp source/player.cpp source/downloads.cpp source/common.cpp \
+              $(pkg-config --cflags --libs libcurl libavformat libavcodec libswresample libavutil sdl2) -lpthread \
+            && cd /tmp && SDL_AUDIODRIVER=disk SDL_DISKAUDIODELAY=40 timeout 300 /tmp/host_test; } 2>&1 | tee /tmp/host.log
       - name: Publish result
         if: always()
         shell: bash
@@ -31,6 +41,8 @@ jobs:
           mkdir -p /tmp/out && cd /tmp/out
           cp /tmp/build.log build.log 2>/dev/null || echo "no build log" > build.log
           cp /tmp/pkgs.txt pkgs.txt 2>/dev/null || true
+          cp /tmp/host.log host.log 2>/dev/null || true
+          cp /tmp/ytmusic-data/log.txt host-applog.txt 2>/dev/null || true
           cp $GITHUB_WORKSPACE/ytmusic-switch/*.nro . 2>/dev/null || true
           echo "${sha} ${{ job.status }}" > status.txt
           git init -q && git checkout -q -b switch-ci
