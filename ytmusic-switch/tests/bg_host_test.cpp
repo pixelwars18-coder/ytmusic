@@ -85,7 +85,7 @@ int main() {
     SdlSink sink;
     sink.open();
     Engine engine(&sink, kRoot);
-    Service service(engine, kRoot);
+    BgService service(engine, kRoot);
     std::atomic<bool> quit{false};
     std::thread loop([&] { while (!quit) { service.poll(); std::this_thread::sleep_for(100ms); } });
 

@@ -87,7 +87,7 @@ int main() {
     if (!sink->open()) { bglog("audio renderer failed"); return 1; }
     {
         Engine engine(sink, kRoot);
-        Service service(engine, kRoot);
+        BgService service(engine, kRoot);
         while (!service.quitRequested()) {
             service.poll();
             svcSleepThread(100'000'000);

@@ -9,7 +9,7 @@
 using json = nlohmann::json;
 void bglog(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
-Service::Service(Engine &e, std::string r) : engine(e), root(std::move(r)) {
+BgService::BgService(Engine &e, std::string r) : engine(e), root(std::move(r)) {
     // carry on from the last command a previous run handled; the app may already have queued new ones
     std::ifstream f(BgProto::status(root));
     if (f) {
@@ -37,7 +37,7 @@ static std::vector<BgTrack> tracksFrom(const json &a) {
     return v;
 }
 
-void Service::apply(const std::string &text) {
+void BgService::apply(const std::string &text) {
     json root_;
     try { root_ = json::parse(text); } catch (...) { return; }   // half-written: next poll
     for (auto &c : root_.value("cmds", json::array())) {
@@ -65,7 +65,7 @@ void Service::apply(const std::string &text) {
     writeStatus(true);
 }
 
-void Service::poll() {
+void BgService::poll() {
     std::ifstream f(BgProto::ctl(root));
     if (f) {
         std::stringstream ss;
@@ -81,7 +81,7 @@ void Service::poll() {
 }
 
 // Written every second while the app is talking to us, otherwise only on changes and every 20 s (SD wear).
-void Service::writeStatus(bool force) {
+void BgService::writeStatus(bool force) {
     const int64_t now = int64_t(time(nullptr));
     const EngineStatus st = engine.status();
     const std::string key = st.state + "|" + st.vid + "|" + std::to_string(st.index) + "|" + st.err;

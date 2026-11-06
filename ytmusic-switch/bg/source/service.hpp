@@ -3,9 +3,9 @@
 #include <string>
 
 // Reads the app's commands from ctl.json and reports status.json (see shared/bgproto.hpp).
-class Service {
+class BgService {
 public:
-    Service(Engine &e, std::string root);
+    BgService(Engine &e, std::string root);
     void poll();          // call every ~100 ms
     bool quitRequested() const { return quit; }
 private:
