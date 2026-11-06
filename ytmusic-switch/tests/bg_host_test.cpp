@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <ctime>
 #include <fstream>
 #include <functional>
 #include <sstream>
@@ -55,6 +56,7 @@ static long long seq = 0;
 
 static void send(json c) {
     c["seq"] = ++seq;
+    c["t"] = (long long)time(nullptr);
     cmds.push_back(c);
     std::ofstream(BgProto::ctl(kRoot) + ".tmp") << json{{"cmds", cmds}}.dump();
     std::remove(BgProto::ctl(kRoot).c_str());
