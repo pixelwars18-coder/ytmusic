@@ -20,7 +20,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ytmusic-switch/ffmpeg-min
-          key: ffmpeg-min-horizon-n7.1-v1
+          key: ffmpeg-min-none-n7.1-v2
       - name: Build minimal ffmpeg for the background service
         shell: bash
         working-directory: ytmusic-switch
@@ -31,14 +31,14 @@ jobs:
             cd /tmp/ffsrc
             export PATH=$DEVKITPRO/devkitA64/bin:$PATH
             ./configure --prefix=$GITHUB_WORKSPACE/ytmusic-switch/ffmpeg-min --enable-cross-compile --cross-prefix=aarch64-none-elf- \
-              --arch=aarch64 --cpu=cortex-a57 --target-os=horizon --enable-pic \
+              --arch=aarch64 --cpu=cortex-a57 --target-os=none --enable-pic \
               --extra-cflags="-D__SWITCH__ -D_GNU_SOURCE -O2 -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIC -ftls-model=local-exec -ffunction-sections -fdata-sections -I$DEVKITPRO/libnx/include" \
               --extra-ldflags="-L$DEVKITPRO/libnx/lib" \
               --disable-everything --disable-programs --disable-doc --disable-network --disable-autodetect --disable-pthreads \
               --disable-avdevice --disable-avfilter --disable-swscale --disable-debug --enable-static --disable-shared \
               --enable-avcodec --enable-avformat --enable-swresample \
-              --enable-decoder=opus,aac --enable-demuxer=matroska,mov --enable-parser=opus,aac 2>&1 | tail -15 | tee /tmp/ffconf.log
-            make -j4 > /tmp/ffbuild.log 2>&1 || { tail -40 /tmp/ffbuild.log; exit 1; }
+              --enable-decoder=opus,aac --enable-demuxer=matroska,mov --enable-parser=opus,aac 2>&1 | tail -15 | tee /tmp/ffconf.log || { tail -40 ffbuild/config.log | tee -a /tmp/ffconf.log; exit 1; }
+            make -j4 > /tmp/ffbuild.log 2>&1 || { tail -60 /tmp/ffbuild.log | tee -a /tmp/ffconf.log; exit 1; }
             make install > /dev/null
           fi
           ls -la ffmpeg-min/lib

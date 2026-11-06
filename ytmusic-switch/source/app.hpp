@@ -5,6 +5,7 @@
 #include "library.hpp"
 #include "player.hpp"
 #include "yt.hpp"
+#include "bgremote.hpp"
 #include <functional>
 #include <map>
 #include <mutex>
@@ -41,8 +42,8 @@ public:
     void testView(int v) { view = View(v); tabSel = v; }
     void testFocusTabs() { focus = 1; tabSel = int(view); }
     void testPlay(const Track &t) { playTracks({t}, 0, false); }
-    int testState() const { return int(player.state()); }
-    double testPos() const { return player.position(); }
+    int testState() { return int(pState()); }
+    double testPos() { return pPos(); }
 
 private:
     enum class View { Search, Queue, Liked, Playlists, Downloads, Settings, Count };
@@ -82,6 +83,26 @@ private:
     void toast(const std::string &s);
     void switchView(int dir);
     void ensureVisible();
+
+    // background playback (sysmodule) + facade over the two players
+    Player::State pState();
+    double pPos();
+    double pDur();
+    int pVol();
+    void pSeek(double s);
+    void pToggle();
+    void pSetVol(int v);
+    void pStop();
+    std::string queueSignature() const;
+    json queueJson();
+    void sendLoad(int index, double pos, bool paused);
+    void sendMode();
+    void toggleBackground();
+    BgRemote bg;
+    bool remote = false;
+    int remoteVol = 80;
+    std::string queueSig, lastBgErr;
+    float bgPollT = 0, bgPingT = 0;
 
     // drawing
     void drawTopBar();

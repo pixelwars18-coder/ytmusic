@@ -425,12 +425,14 @@ void Engine::decodeLoop(std::shared_ptr<Session> s) {
     const double tb = av_q2d(as->time_base);
     double lastPts = s->startAt;
 
+    double skipUntil = -1;   // after a seek: drop audio before the target (seeks land on the previous keyframe)
     auto doSeek = [&](double t) {
         av_seek_frame(fmt, aidx, int64_t(t / tb), AVSEEK_FLAG_BACKWARD);
         avcodec_flush_buffers(cc);
         sink->clear();
         lastPts = t;
         s->pos = t;
+        skipUntil = t;
     };
     if (s->startAt > 0.5) doSeek(s->startAt);
 
@@ -440,7 +442,7 @@ void Engine::decodeLoop(std::shared_ptr<Session> s) {
         const double sk = s->seekTo.exchange(-1);
         if (sk >= 0) { doSeek(sk); eof = false; if (s->state == 3) s->state = 1; }
         const int queued = sink->queuedFrames();
-        if (s->state != 0) s->pos = std::max(0.0, lastPts - double(queued) / Sink::kRate);
+        if (s->state != 0 && skipUntil < 0) s->pos = std::max(0.0, lastPts - double(queued) / Sink::kRate);
         if (s->state == 2 || queued > maxQueued) { std::this_thread::sleep_for(10ms); continue; }
         if (eof) {
             if (needFlush && queued > 0) { sink->flush(); needFlush = false; }
@@ -468,6 +470,10 @@ void Engine::decodeLoop(std::shared_ptr<Session> s) {
         while (avcodec_receive_frame(cc, frame) == 0) {
             if (frame->pts != AV_NOPTS_VALUE) lastPts = frame->pts * tb + double(frame->nb_samples) / cc->sample_rate;
             else lastPts += double(frame->nb_samples) / cc->sample_rate;
+            if (skipUntil >= 0) {
+                if (lastPts < skipUntil) continue;   // whole frame before the target
+                skipUntil = -1;
+            }
             const int maxOut = swr_get_out_samples(swr, frame->nb_samples);
             out.resize(size_t(maxOut) * 2);
             uint8_t *op = reinterpret_cast<uint8_t *>(out.data());

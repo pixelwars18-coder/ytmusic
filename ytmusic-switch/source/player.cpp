@@ -248,6 +248,7 @@ void Player::decodeLoop(std::shared_ptr<Session> s) {
     const int bytesPerSec = rate * 2 * 2;
     double lastPts = s->startAt;
 
+    double skipUntil = -1;   // drop audio before a seek target (seeks land on the previous keyframe)
     auto doSeek = [&](double t) {
         const int64_t ts = int64_t(t / tb);
         av_seek_frame(fmt, aidx, ts, AVSEEK_FLAG_BACKWARD);
@@ -255,6 +256,7 @@ void Player::decodeLoop(std::shared_ptr<Session> s) {
         SDL_ClearQueuedAudio(dev);
         lastPts = t;
         posBase = t;
+        skipUntil = t;
     };
     if (s->startAt > 0.5) doSeek(s->startAt);
 
@@ -265,7 +267,7 @@ void Player::decodeLoop(std::shared_ptr<Session> s) {
 
         // keep ~0.6 s queued; position = last decoded pts minus what is still queued
         const Uint32 queued = SDL_GetQueuedAudioSize(dev);
-        posBase = std::max(0.0, lastPts - double(queued) / bytesPerSec);
+        if (skipUntil < 0) posBase = std::max(0.0, lastPts - double(queued) / bytesPerSec);
         if (st == Paused || queued > Uint32(bytesPerSec * 0.6)) {
             std::this_thread::sleep_for(10ms);
             continue;
@@ -294,6 +296,10 @@ void Player::decodeLoop(std::shared_ptr<Session> s) {
         while (avcodec_receive_frame(cc, frame) == 0) {
             if (frame->pts != AV_NOPTS_VALUE) lastPts = frame->pts * tb + double(frame->nb_samples) / cc->sample_rate;
             else lastPts += double(frame->nb_samples) / cc->sample_rate;
+            if (skipUntil >= 0) {
+                if (lastPts < skipUntil) continue;
+                skipUntil = -1;
+            }
             const int maxOut = swr_get_out_samples(swr, frame->nb_samples);
             out.resize(size_t(maxOut) * 2);
             uint8_t *op = reinterpret_cast<uint8_t *>(out.data());

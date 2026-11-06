@@ -3,6 +3,7 @@
 #include <cmath>
 #include <random>
 #include <ctime>
+#include <SDL2/SDL.h>
 
 namespace {
 constexpr float W = 1280, H = 720;
@@ -31,13 +32,24 @@ bool App::init(SDL_Renderer *r, const std::vector<Gfx::FontBlob> &fonts) {
     player.setVolume(lib.volume);
     dl.start();
     if (!lib.queue.empty()) view = View::Queue;
+    if (lib.bg) {   // background mode: reconnect to (or restart) the service
+        const bool wasRunning = bg.running();
+        const std::string e = bg.start();
+        if (!e.empty()) { toast(e); lib.bg = false; }
+        else {
+            remote = true;
+            remoteVol = lib.volume;
+            queueSig = queueSignature();
+            if (!wasRunning && lib.current >= 0) sendLoad(lib.current, 0, true);   // ready to resume with +
+        }
+    }
     tabSel = int(view);
     return true;
 }
 
 void App::shutdown() {
     quitting = true;
-    lib.volume = player.volume();
+    lib.volume = pVol();
     lib.save();
     player.shutdown();
     dl.stop();
@@ -87,6 +99,9 @@ std::vector<App::Row> App::rows() {
         act("Clear recent searches", std::to_string(lib.history.size()) + " saved", "clearhist");
         act("Shuffle: " + std::string(lib.shuffle ? "on" : "off"), "Play the queue in random order", "shuffle");
         act(std::string("Repeat: ") + (lib.repeat == 0 ? "off" : lib.repeat == 1 ? "all" : "one"), "What happens at the end of the queue", "repeat");
+        act(std::string("Background playback: ") + (lib.bg ? "On" : "Off"),
+            lib.bg ? (remote && bg.alive() ? "Music keeps playing outside the app and in games (service running)" : "Starting the background service\xE2\x80\xA6")
+                   : "Keep playing after you leave the app or start a game (installs a small background service)", "bg");
         act(std::string("Theme: ") + (lib.dark ? "Basic Black" : "Basic White"), "Switch between the dark and light look", "theme");
         act("Controls", "A play · X like · Y search · \xE2\x88\x92 menu · + play/pause (hold: exit) · ZL/ZR prev/next · R-stick seek/volume", "help");
         act("Exit", "Saves and closes YT Music", "exit");
@@ -195,6 +210,7 @@ void App::playIndex(int i) {
     lib.current = i;
     nextPick = -1;
     lib.markDirty();
+    if (remote) { sendLoad(i, 0, false); return; }
     const Track t = lib.queue[size_t(i)];
     const int gen = ++loadGen;
     const std::string local = dl.pathFor(t.vid);
@@ -239,17 +255,20 @@ int App::pickNext(bool automatic) {
 }
 
 void App::next(bool automatic) {
+    if (remote) { bg.send({{"cmd", "next"}}); return; }
     const int j = pickNext(automatic);
-    if (j < 0) { player.stop(); return; }
+    if (j < 0) { pStop(); return; }
     playIndex(j);
 }
 
 void App::prev() {
-    if (player.position() > 5 || lib.current <= 0) player.seek(0);
+    if (remote) { bg.send({{"cmd", "prev"}}); return; }
+    if (pPos() > 5 || lib.current <= 0) pSeek(0);
     else playIndex(lib.current - 1);
 }
 
 void App::preloadNext() {
+    if (remote) return;
     if (lib.queue.empty() || !preloading.empty()) return;
     nextPick = pickNext(true);
     if (nextPick < 0 || nextPick >= int(lib.queue.size())) return;
@@ -333,7 +352,7 @@ void App::openMenu(const Row *r) {
                 if (idx < 0 || idx >= int(lib.queue.size())) return;
                 lib.queue.erase(lib.queue.begin() + idx);
                 if (idx < lib.current) --lib.current;
-                else if (idx == lib.current) { player.stop(); lib.current = -1; }
+                else if (idx == lib.current) { pStop(); lib.current = -1; }
                 nextPick = -1;
                 lib.markDirty();
             }, true});
@@ -372,7 +391,7 @@ void App::openMenu(const Row *r) {
         if (view != View::Queue) menu.push_back({"Add all to queue", [this, all] { for (auto &t : all) lib.queue.push_back(t); lib.markDirty(); toast("Added " + std::to_string(all.size()) + " songs"); }});
         if (view != View::Downloads) menu.push_back({"Download all", [this, all] { int n = dl.add(all); toast(n ? "Downloading " + std::to_string(n) + " songs" : "Already downloaded"); }});
         if (view == View::Liked || view == View::Queue) menu.push_back({"Save as playlist\xE2\x80\xA6", [this, all] { openAddToPlaylist(all); }});
-        if (view == View::Queue) menu.push_back({"Clear queue", [this] { player.stop(); lib.queue.clear(); lib.current = -1; lib.markDirty(); }, true});
+        if (view == View::Queue) menu.push_back({"Clear queue", [this] { pStop(); lib.queue.clear(); lib.current = -1; lib.markDirty(); }, true});
     }
     if (menu.empty()) menuTitle.clear();
 }
@@ -395,9 +414,10 @@ void App::activate(const Row &r) {
         if (r.id == "import") { bool ok; toast(lib.importBackup(Paths::backup(), &ok)); }
         else if (r.id == "export") { const std::string e = lib.exportBackup(Paths::backup()); toast(e.empty() ? "Saved " + Paths::backup() : e); }
         else if (r.id == "clearhist") { lib.history.clear(); lib.markDirty(); toast("Search history cleared"); }
-        else if (r.id == "shuffle") { lib.shuffle = !lib.shuffle; nextPick = -1; lib.markDirty(); }
-        else if (r.id == "repeat") { lib.repeat = (lib.repeat + 1) % 3; lib.markDirty(); }
+        else if (r.id == "shuffle") { lib.shuffle = !lib.shuffle; nextPick = -1; lib.markDirty(); sendMode(); }
+        else if (r.id == "repeat") { lib.repeat = (lib.repeat + 1) % 3; lib.markDirty(); sendMode(); }
         else if (r.id == "exit") quitting = true;
+        else if (r.id == "bg") toggleBackground();
         else if (r.id == "theme") { lib.dark = !lib.dark; setDarkTheme(lib.dark); lib.markDirty(); }
         return;
     case Row::Song:
@@ -432,6 +452,109 @@ void App::ensureVisible() {
     if (scroll[v] < 0) scroll[v] = 0;
 }
 
+// --------------------------------------------------------- background mode
+// Playback facade: the in-app player, or the background service when background playback is on.
+Player::State App::pState() {
+    if (!remote) return player.state();
+    const std::string &s = bg.status().state;
+    if (s == "playing") return Player::Playing;
+    if (s == "loading" || s == "error") return Player::Loading;
+    if (s == "paused") return lib.current >= 0 ? Player::Paused : Player::Idle;
+    return Player::Idle;
+}
+double App::pPos() { return remote ? bg.position(SDL_GetTicks()) : player.position(); }
+double App::pDur() { return remote ? bg.status().dur : player.duration(); }
+int App::pVol() { return remote ? remoteVol : player.volume(); }
+void App::pSeek(double s) {
+    if (remote) bg.send({{"cmd", "seek"}, {"pos", std::max(0.0, s)}});
+    else player.seek(s);
+}
+void App::pToggle() {
+    if (!remote) { player.togglePause(); return; }
+    if (bg.status().state == "idle" && lib.current >= 0) sendLoad(lib.current, 0, false);
+    else bg.send({{"cmd", "toggle"}});
+}
+void App::pSetVol(int v) {
+    v = std::clamp(v, 0, 100);
+    player.setVolume(v);
+    if (remote) { remoteVol = v; bg.send({{"cmd", "volume"}, {"volume", v}}); }
+}
+void App::pStop() {
+    if (remote) bg.send({{"cmd", "stop"}});
+    else player.stop();
+}
+
+std::string App::queueSignature() const {
+    std::string s;
+    s.reserve(lib.queue.size() * 12);
+    for (auto &t : lib.queue) { s += t.vid; s += ','; }
+    return s;
+}
+
+json App::queueJson() {
+    json a = json::array();
+    int withUrl = 0;
+    for (size_t i = 0; i < lib.queue.size(); ++i) {
+        const Track &t = lib.queue[i];
+        json j = t.toJson();
+        const std::string f = dl.pathFor(t.vid);
+        if (!f.empty()) j["file"] = f;
+        auto it = urlCache.find(t.vid);
+        if (it != urlCache.end() && fresh(it->second) && withUrl < 8) {   // saves the service a lookup
+            j["url"] = it->second.url;
+            j["ua"] = it->second.userAgent;
+            j["len"] = it->second.contentLength;
+            j["exp"] = it->second.expires;
+            ++withUrl;
+        }
+        a.push_back(j);
+    }
+    return a;
+}
+
+void App::sendLoad(int index, double pos, bool paused) {
+    lib.current = index;
+    lib.markDirty();
+    queueSig = queueSignature();
+    bg.send({{"cmd", "load"}, {"queue", queueJson()}, {"index", index}, {"pos", pos}, {"paused", paused}, {"volume", remoteVol},
+             {"shuffle", lib.shuffle}, {"repeat", lib.repeat}, {"visitor", YT::visitorId()}});
+}
+
+void App::sendMode() {
+    if (remote) bg.send({{"cmd", "mode"}, {"shuffle", lib.shuffle}, {"repeat", lib.repeat}});
+}
+
+void App::toggleBackground() {
+    if (!lib.bg) {
+        toast("Starting the background service\xE2\x80\xA6");
+        const std::string e = bg.start();
+        if (!e.empty()) { toast(e); return; }
+        // hand the current song over at the same spot
+        const double pos = player.position();
+        const bool wasPlaying = player.state() == Player::Playing || player.state() == Player::Loading;
+        player.stop();
+        lib.bg = true;
+        remote = true;
+        remoteVol = player.volume();
+        lib.markDirty();
+        if (lib.current >= 0) sendLoad(lib.current, pos, !wasPlaying);
+        toast("Background playback on: music keeps going when you leave the app");
+    } else {
+        const double pos = pPos();
+        const bool wasPlaying = pState() == Player::Playing;
+        bg.stop();
+        remote = false;
+        lib.bg = false;
+        lib.markDirty();
+        player.setVolume(remoteVol);
+        if (lib.current >= 0 && wasPlaying) {
+            playIndex(lib.current);
+            if (pos > 1) player.seek(pos);
+        }
+        toast("Background playback off");
+    }
+}
+
 // ------------------------------------------------------------------ frame
 bool App::frame(const Input &in) {
     {   // results from background jobs
@@ -444,8 +567,30 @@ bool App::frame(const Input &in) {
     if (toastT > 0) toastT -= in.dt;
     clock += in.dt;
 
+    // background service: mirror what it's doing, keep it informed
+    if (remote) {
+        bgPollT += in.dt;
+        if (bgPollT > 0.25f) {
+            bgPollT = 0;
+            bg.poll(SDL_GetTicks());
+            const auto &st = bg.status();
+            if (st.index >= 0 && st.index < int(lib.queue.size()) && lib.queue[size_t(st.index)].vid == st.vid && st.index != lib.current) {
+                lib.current = st.index;
+                lib.markDirty();
+            }
+            if (!st.err.empty() && st.err != lastBgErr) toast("Can't play: " + st.err.substr(0, 70));
+            lastBgErr = st.err;
+        }
+        if ((bgPingT += in.dt) > 2) { bgPingT = 0; bg.send({{"cmd", "ping"}}); }
+        const std::string sig = queueSignature();
+        if (sig != queueSig) {   // queue edited here: tell the service without interrupting the song
+            queueSig = sig;
+            bg.send({{"cmd", "queue"}, {"queue", queueJson()}, {"index", lib.current}});
+        }
+    }
+
     // player housekeeping
-    const Player::State ps = player.state();
+    const Player::State ps = remote ? Player::Idle : pState();
     if (ps == Player::Ended) next(true);
     else if (ps == Player::Error) {
         toast("Playback error: " + player.error());
@@ -453,10 +598,10 @@ bool App::frame(const Input &in) {
         if (lib.current >= 0) urlCache.erase(lib.queue[size_t(lib.current)].vid);
         if (++errorStreak < 5) next(true);
     } else if (ps == Player::Playing) {
-        if (player.position() > 3) { errorStreak = 0; preloadNext(); }
+        if (pPos() > 3) { errorStreak = 0; preloadNext(); }
     }
     saveT += in.dt;
-    if (saveT > 5) { saveT = 0; lib.volume = player.volume(); lib.saveIfDirty(); }
+    if (saveT > 5) { saveT = 0; lib.volume = pVol(); lib.saveIfDirty(); }
 
     auto rs = rows();
     const int v = int(view);
@@ -527,20 +672,20 @@ bool App::frame(const Input &in) {
         if (plusHeld > 1.2f) quitting = true;
     } else {
         if (plusHeld > 0 && plusHeld < 1.2f) {   // released: play/pause
-            if (player.state() == Player::Idle && lib.current >= 0) playIndex(lib.current);
-            else if (player.state() == Player::Idle && !lib.queue.empty()) playIndex(0);
-            else player.togglePause();
+            if (pState() == Player::Idle && lib.current >= 0) playIndex(lib.current);
+            else if (pState() == Player::Idle && !lib.queue.empty()) playIndex(0);
+            else pToggle();
         }
         plusHeld = 0;
     }
     // right stick: seek (x) and volume (y)
     if (std::fabs(in.rx) > 0.5f) {
         seekAccum += in.dt;
-        if (seekAccum > 0.18f) { seekAccum = 0; player.seek(player.position() + (in.rx > 0 ? 10 : -10)); }
+        if (seekAccum > 0.18f) { seekAccum = 0; pSeek(pPos() + (in.rx > 0 ? 10 : -10)); }
     } else seekAccum = 0.18f;
     if (std::fabs(in.ry) > 0.5f) {
         volAccum += in.dt;
-        if (volAccum > 0.08f) { volAccum = 0; player.setVolume(player.volume() + (in.ry > 0 ? 2 : -2)); toastVol = 1.2f; }
+        if (volAccum > 0.08f) { volAccum = 0; pSetVol(pVol() + (in.ry > 0 ? 2 : -2)); toastVol = 1.2f; }
     } else volAccum = 0.08f;
     if (toastVol > 0) toastVol -= in.dt;
 
@@ -585,7 +730,7 @@ bool App::frame(const Input &in) {
             const int i = int((x - kTileX0 + scrollShown[v]) / (kTile + kGap));
             if (i >= 0 && i < int(rs.size())) { focus = 0; if (i == s) activate(rs[size_t(i)]); else s = i; }
         } else if (y > kHintY) {
-            if (x < 520) player.togglePause();
+            if (x < 520) pToggle();
             else if (x > W - 170) askSearch();
         }
     }
@@ -714,7 +859,7 @@ void App::drawTiles() {
                                  (view != View::Queue || r.index == lib.current);
             if (playing) {   // equaliser bars on the playing song
                 g.fillRound(x, kTileY, kTile, kTile, 26, SDL_Color{0, 0, 0, 120});
-                const bool moving = player.state() == Player::Playing;
+                const bool moving = pState() == Player::Playing;
                 for (int b = 0; b < 4; ++b) {
                     const float hgt = moving ? 22 + 30 * (0.5f + 0.5f * std::sin(clock * (5 + b * 1.7f) + b)) : 18;
                     g.fillRound(x + kTile / 2 - 34 + b * 18, kTileY + kTile / 2 + 26 - hgt, 12, hgt, 4, t.accent);
@@ -813,7 +958,7 @@ void App::drawHints() {
     const Theme &t = TH();
     g.fillRect(28, kHintY, W - 56, 1, t.line);
     const Track *tr = (lib.current >= 0 && lib.current < int(lib.queue.size())) ? &lib.queue[size_t(lib.current)] : nullptr;
-    const Player::State st = player.state();
+    const Player::State st = pState();
     const float y = kHintY + 12;
     g.fillRound(36, y, 44, 44, 10, t.panel);
     if (tr) { if (SDL_Texture *tx = thumbs.get(tr->vid)) g.image(tx, 36, y, 44, 44, 10); }
@@ -822,13 +967,13 @@ void App::drawHints() {
     g.text(tr ? tr->title : "Nothing playing", tx0, y + 1, 16, t.text, int(tw), Align::Left, true);
     std::string sub;
     if (loadingTrack || st == Player::Loading) sub = "Loading\xE2\x80\xA6";
-    else if (tr) sub = (st == Player::Paused ? "Paused \xC2\xB7 " : "") + fmtTime(player.position()) + " / " + fmtTime(player.duration() > 0 ? player.duration() : tr->duration);
+    else if (tr) sub = (st == Player::Paused ? "Paused \xC2\xB7 " : "") + fmtTime(pPos()) + " / " + fmtTime(pDur() > 0 ? pDur() : tr->duration);
     else sub = "Pick a song and press A";
-    if (toastVol > 0) sub = "Volume " + std::to_string(player.volume());
+    if (toastVol > 0) sub = "Volume " + std::to_string(pVol());
     g.text(sub, tx0, y + 24, 13, (loadingTrack || st == Player::Loading) ? t.accent : t.sub, int(tw));
     // thin progress line under the hairline
-    const double d = player.duration() > 0 ? player.duration() : (tr ? tr->duration : 0);
-    if (tr && d > 0 && st != Player::Idle) g.fillRect(28, kHintY - 1, float((W - 56) * std::clamp(player.position() / d, 0.0, 1.0)), 3, t.accent);
+    const double d = pDur() > 0 ? pDur() : (tr ? tr->duration : 0);
+    if (tr && d > 0 && st != Player::Idle) g.fillRect(28, kHintY - 1, float((W - 56) * std::clamp(pPos() / d, 0.0, 1.0)), 3, t.accent);
 
     // button guide, right to left
     float x = W - 40;

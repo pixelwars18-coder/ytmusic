@@ -10,15 +10,10 @@ using json = nlohmann::json;
 void bglog(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 Service::Service(Engine &e, std::string r) : engine(e), root(std::move(r)) {
-    // commands already in ctl.json when we start are old: skip them
-    std::ifstream f(BgProto::ctl(root));
+    // carry on from the last command a previous run handled; the app may already have queued new ones
+    std::ifstream f(BgProto::status(root));
     if (f) {
-        std::stringstream ss;
-        ss << f.rdbuf();
-        lastCtl = ss.str();
-        try {
-            for (auto &c : json::parse(lastCtl).value("cmds", json::array())) lastSeq = std::max(lastSeq, c.value("seq", 0LL));
-        } catch (...) {}
+        try { lastSeq = json::parse(f).value("seq", 0LL); } catch (...) {}
     }
     writeStatus(true);
 }
@@ -49,6 +44,7 @@ void Service::apply(const std::string &text) {
         const long long seq = c.value("seq", 0LL);
         if (seq <= lastSeq) continue;
         lastSeq = seq;
+        if (c.value("t", int64_t(0)) < int64_t(time(nullptr)) - 30) continue;   // stale (left over from an old session)
         const std::string cmd = c.value("cmd", std::string());
         lastPing = int64_t(time(nullptr));
         if (c.contains("visitor") && !c["visitor"].get<std::string>().empty()) engine.visitor = c["visitor"].get<std::string>();

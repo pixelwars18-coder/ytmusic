@@ -20,6 +20,7 @@ static bool showKeyboard(const std::string &guide, const std::string &initial, s
 
 int main(int, char **) {
     socketInitializeDefault();
+    romfsInit();
     psmInitialize();
     plInitialize(PlServiceType_User);
     // system fonts: Latin/Japanese first, then Chinese, Korean and Nintendo's symbols as fallbacks
@@ -119,6 +120,7 @@ int main(int, char **) {
     SDL_Quit();
     plExit();
     psmExit();
+    romfsExit();
     socketExit();
     return 0;
 }

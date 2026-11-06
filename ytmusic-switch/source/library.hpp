@@ -19,6 +19,7 @@ public:
     bool shuffle = false;
     int repeat = 0;   // 0 off, 1 all, 2 one
     bool dark = true; // theme
+    bool bg = false;  // background playback (sysmodule)
 
     void load();
     void save();

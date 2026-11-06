@@ -80,6 +80,7 @@ static void rememberVisitor(const json &j) {
 }
 
 static std::string visitor() { std::lock_guard<std::mutex> l(gMu); return gVisitor; }
+std::string visitorId() { return visitor(); }
 
 static Net::Response call(const std::string &ep, json body, const json &clientCtx, int clientId) {
     body["context"]["client"] = clientCtx;

@@ -89,8 +89,9 @@ int main() {
     std::atomic<bool> quit{false};
     std::thread loop([&] { while (!quit) { service.poll(); std::this_thread::sleep_for(100ms); } });
 
-    json q = json::array({{{"vid", "jNQXAC9IVRw"}, {"title", "Me at the zoo"}, {"artist", "jawed"}, {"duration", 19}},
-                          {{"vid", "dQw4w9WgXcQ"}, {"title", "Never Gonna Give You Up"}, {"artist", "Rick Astley"}, {"duration", 213}}});
+    // the same song twice (CI's datacenter IPs get bot checks on most other videos)
+    json q = json::array({{{"vid", "dQw4w9WgXcQ"}, {"title", "Never Gonna Give You Up (a)"}, {"artist", "Rick Astley"}, {"duration", 213}},
+                          {{"vid", "dQw4w9WgXcQ"}, {"title", "Never Gonna Give You Up (b)"}, {"artist", "Rick Astley"}, {"duration", 213}}});
     auto t0 = std::chrono::steady_clock::now();
     send({{"cmd", "load"}, {"queue", q}, {"index", 1}, {"pos", 0}, {"volume", 70}, {"shuffle", false}, {"repeat", 0}});
     const bool playing = waitFor(30, [](const json &s) { return s.value("state", "") == "playing" && s.value("pos", 0.0) > 0.5; });
@@ -110,13 +111,13 @@ int main() {
     send({{"cmd", "prev"}});   // > 5 s in: restarts the song
     check(waitFor(5, [](const json &s) { return s.value("pos", 99.0) < 5 && s.value("index", -1) == 1; }), "prev restarts song");
     // auto-advance: repeat all, short video near its end
-    send({{"cmd", "load"}, {"queue", q}, {"index", 0}, {"pos", 14}, {"shuffle", false}, {"repeat", 1}});
-    check(waitFor(30, [](const json &s) { return s.value("index", -1) == 0 && s.value("state", "") == "playing"; }), "load song 0 at 0:14");
+    send({{"cmd", "load"}, {"queue", q}, {"index", 0}, {"pos", 206}, {"shuffle", false}, {"repeat", 1}});
+    check(waitFor(30, [](const json &s) { return s.value("index", -1) == 0 && s.value("state", "") == "playing"; }), "load song 0 at 3:26");
     check(waitFor(30, [](const json &s) { return s.value("index", -1) == 1 && s.value("state", "") == "playing"; }), "auto-advance to next song");
     send({{"cmd", "next"}});   // repeat all: wraps to 0
     check(waitFor(20, [](const json &s) { return s.value("index", -1) == 0 && s.value("state", "") == "playing"; }), "next wraps (repeat all)");
     send({{"cmd", "queue"}, {"queue", json::array({q[1], q[0]})}, {"index", 1}});
-    check(waitFor(3, [](const json &s) { return s.value("index", -1) == 1 && s.value("vid", "") == "jNQXAC9IVRw" && s.value("state", "") == "playing"; }), "queue edit keeps playing");
+    check(waitFor(3, [](const json &s) { return s.value("index", -1) == 1 && s.value("state", "") == "playing" && s.value("pos", 0.0) > 1; }), "queue edit keeps playing");
     send({{"cmd", "quit"}});
     check(waitFor(3, [&](const json &s) { return service.quitRequested(); }), "quit");
     quit = true;
