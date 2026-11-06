@@ -16,6 +16,39 @@ jobs:
         run: |
           dkp-pacman -Sy --noconfirm --needed switch-sdl2 switch-sdl2_ttf switch-sdl2_image switch-curl switch-ffmpeg switch-mbedtls switch-libjpeg-turbo switch-libpng switch-freetype switch-harfbuzz switch-zlib 2>&1 | tail -5 || true
           dkp-pacman -Qq | grep '^switch-' > /tmp/pkgs.txt || true
+      - name: Cache minimal ffmpeg (background service)
+        uses: actions/cache@v4
+        with:
+          path: ytmusic-switch/ffmpeg-min
+          key: ffmpeg-min-horizon-n7.1-v1
+      - name: Build minimal ffmpeg for the background service
+        shell: bash
+        working-directory: ytmusic-switch
+        run: |
+          set -o pipefail
+          if [ ! -f ffmpeg-min/lib/libavcodec.a ]; then
+            git clone -q --depth 1 -b n7.1 https://github.com/FFmpeg/FFmpeg.git /tmp/ffsrc
+            cd /tmp/ffsrc
+            export PATH=$DEVKITPRO/devkitA64/bin:$PATH
+            ./configure --prefix=$GITHUB_WORKSPACE/ytmusic-switch/ffmpeg-min --enable-cross-compile --cross-prefix=aarch64-none-elf- \
+              --arch=aarch64 --cpu=cortex-a57 --target-os=horizon --enable-pic \
+              --extra-cflags="-D__SWITCH__ -D_GNU_SOURCE -O2 -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIC -ftls-model=local-exec -ffunction-sections -fdata-sections -I$DEVKITPRO/libnx/include" \
+              --extra-ldflags="-L$DEVKITPRO/libnx/lib" \
+              --disable-everything --disable-programs --disable-doc --disable-network --disable-autodetect --disable-pthreads \
+              --disable-avdevice --disable-avfilter --disable-swscale --disable-debug --enable-static --disable-shared \
+              --enable-avcodec --enable-avformat --enable-swresample \
+              --enable-decoder=opus,aac --enable-demuxer=matroska,mov --enable-parser=opus,aac 2>&1 | tail -15 | tee /tmp/ffconf.log
+            make -j4 > /tmp/ffbuild.log 2>&1 || { tail -40 /tmp/ffbuild.log; exit 1; }
+            make install > /dev/null
+          fi
+          ls -la ffmpeg-min/lib
+      - name: Build background service (sysmodule)
+        shell: bash
+        working-directory: ytmusic-switch/bg
+        run: |
+          set -o pipefail
+          make -j4 2>&1 | tee /tmp/bg.log
+          mkdir -p ../romfs/bg && cp ytmusic-bg.nsp ../romfs/bg/exefs.nsp && ls -la ytmusic-bg.nsp
       - name: Build
         working-directory: ytmusic-switch
         shell: bash
@@ -32,6 +65,15 @@ jobs:
           { g++ -std=gnu++20 -O1 -o /tmp/host_test tests/host_test.cpp source/yt.cpp source/net.cpp source/player.cpp source/downloads.cpp source/common.cpp \
               $(pkg-config --cflags --libs libcurl libavformat libavcodec libswresample libavutil sdl2) -lpthread \
             && cd /tmp && SDL_AUDIODRIVER=disk SDL_DISKAUDIODELAY=40 timeout 300 /tmp/host_test; } 2>&1 | tee /tmp/host.log
+      - name: Background service test (real YouTube)
+        if: always()
+        shell: bash
+        working-directory: ytmusic-switch
+        run: |
+          set -o pipefail
+          { g++ -std=gnu++20 -O1 -o /tmp/bg_test tests/bg_host_test.cpp bg/source/engine.cpp bg/source/service.cpp bg/source/resolve.cpp source/net.cpp \
+              $(pkg-config --cflags --libs libcurl libavformat libavcodec libswresample libavutil sdl2) -lpthread \
+            && cd /tmp && SDL_AUDIODRIVER=disk SDL_DISKAUDIODELAY=40 timeout 300 /tmp/bg_test; } 2>&1 | tee /tmp/bgtest.log
       - name: UI screenshots (Linux)
         if: always()
         shell: bash
@@ -52,6 +94,10 @@ jobs:
           cp /tmp/pkgs.txt pkgs.txt 2>/dev/null || true
           cp /tmp/host.log host.log 2>/dev/null || true
           cp /tmp/ui.log ui.log 2>/dev/null || true
+          cp /tmp/bg.log bg-build.log 2>/dev/null || true
+          cp /tmp/bgtest.log bg-test.log 2>/dev/null || true
+          cp /tmp/ffconf.log ffconf.log 2>/dev/null || true
+          cp $GITHUB_WORKSPACE/ytmusic-switch/bg/ytmusic-bg.nsp . 2>/dev/null || true
           cp /tmp/shots/*.png . 2>/dev/null || true
           cp /tmp/ytmusic-data/log.txt host-applog.txt 2>/dev/null || true
           cp $GITHUB_WORKSPACE/ytmusic-switch/*.nro . 2>/dev/null || true

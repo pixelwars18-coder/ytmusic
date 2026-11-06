@@ -5,3 +5,6 @@ local.properties
 *.jks
 *.apk
 *.new
+ytmusic-switch/ffmpeg-min/
+ytmusic-switch/romfs/bg/
+ytmusic-switch/bg/build/
