@@ -1,0 +1,17 @@
+app.cpp
+bgremote.cpp
+common.cpp
+downloads.cpp
+gfx.cpp
+library.cpp
+main.cpp
+net.cpp
+player.cpp
+yt.cpp
+built ... ytmusic.nacp
+linking ytmusic.elf
+Visiting directories...
+Calculating metadata...
+Writing /__w/ytmusic/ytmusic/ytmusic-switch/romfs/.keep to RomFS image...
+Writing /__w/ytmusic/ytmusic/ytmusic-switch/romfs/bg/exefs.nsp to RomFS image...
+built ... ytmusic.nro

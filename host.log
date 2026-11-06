@@ -1,0 +1,27 @@
+CRITICAL: You are using the SDL disk i/o audio driver!
+CRITICAL:  Writing to file [sdlaudio.raw].
+search: 20 results, err='', cont=1, 536 ms
+  dQw4w9WgXcQ | Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster) | Rick Astley | 3:34
+  5SZYz7lZRRI | Rick Astley - Never Gonna Give You Up (Official Music Video) (1987) | Super Top Songs | 3:33
+  3BFTio5296w | Never Gonna Give You Up (2022 Remaster) | Rick Astley | 3:34
+PASS search returns songs
+more: 20 results err=''
+PASS load more
+resolve dQw4w9WgXcQ: client=visionos itag=140 mime=audio/mp4; codecs="mp4a.40.2" len=3449447 exp=1794030523 err='' 136 ms
+PASS resolve stream URL
+PASS audio device
+stream start: Playing after 100 ms (err '') dur=213.1
+PASS stream plays
+pos after 3s: 3.29 buffered 1.00
+PASS position advances
+pos after seek 60: 62.07
+PASS seek
+PASS pause holds position
+radio: 25 tracks
+PASS radio mix
+dl msg: Downloaded "Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)"
+download: ./ytmusic-data/downloads/dQw4w9WgXcQ.m4a 3449447 bytes in 400 ms
+PASS download to file
+PASS local file plays
+local pos 0.00 dur 213.1
+ALL PASSED: 0 failure(s)
