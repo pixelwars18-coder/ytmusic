@@ -41,7 +41,7 @@ jobs:
             make -j4 > /tmp/ffbuild.log 2>&1 || { tail -60 /tmp/ffbuild.log | tee -a /tmp/ffconf.log; exit 1; }
             make install > /tmp/ffinstall.log 2>&1 || { tail -30 /tmp/ffinstall.log; exit 1; }
           fi
-          ls -la ffmpeg-min/lib
+          ls -la $GITHUB_WORKSPACE/ytmusic-switch/ffmpeg-min/lib
       - name: Build background service (sysmodule)
         shell: bash
         working-directory: ytmusic-switch/bg
