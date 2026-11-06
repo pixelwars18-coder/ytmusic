@@ -32,7 +32,13 @@ Needs Atmosphère + the Homebrew Menu and an internet connection (downloaded son
 - `switch/ytmusic/clients.json` – optional override of the YouTube client list if YouTube changes something
 - `switch/ytmusic/log.txt` – log of the last run
 
-Music only plays while the app is open (homebrew apps are suspended on the HOME menu).
+## Background playback
+Settings → **Background playback: On**. The app installs a small background service (an Atmosphère sysmodule,
+`atmosphere/contents/420000000059544D/`) and starts it; from then on the service plays the queue, so music keeps
+going on the HOME menu and in games, and moves on to the next song by itself. The app becomes its remote control.
+Turning it off stops the service and hands the song back to the app. After a reboot the app restarts the service
+the next time you open it (nothing runs at boot). Files: `switch/ytmusic/bg/` (control files, cache, `log.txt`).
+
 
 ## Build
 devkitPro with `switch-dev switch-sdl2 switch-sdl2_ttf switch-sdl2_image switch-curl switch-ffmpeg`, then `make`.
