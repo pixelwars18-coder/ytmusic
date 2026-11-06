@@ -15,12 +15,12 @@ APP_JSON := ytmusic-bg.json
 FFMIN    ?= $(TOPDIR)/../ffmpeg-min
 
 ARCH     := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
-CFLAGS   := -g -Wall -O2 -ffunction-sections -fdata-sections $(ARCH) $(DEFINES) $(INCLUDE) -D__SWITCH__ -I$(FFMIN)/include \
+CFLAGS   := -g -Wall -O2 -ffunction-sections -fdata-sections $(ARCH) $(DEFINES) -I$(FFMIN)/include $(INCLUDE) -D__SWITCH__ \
             $(shell $(PORTLIBS)/bin/aarch64-none-elf-pkg-config --cflags libcurl)
 CXXFLAGS := $(CFLAGS) -std=gnu++20 -fno-rtti
 ASFLAGS  := -g $(ARCH)
 LDFLAGS   = -specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,--gc-sections -Wl,-Map,$(notdir $*.map)
-LIBS     := -L$(FFMIN)/lib -lavformat -lavcodec -lswresample -lavutil \
+LIBS     := $(FFMIN)/lib/libavformat.a $(FFMIN)/lib/libavcodec.a $(FFMIN)/lib/libswresample.a $(FFMIN)/lib/libavutil.a \
             $(shell $(PORTLIBS)/bin/aarch64-none-elf-pkg-config --libs --static libcurl) -lnx -lm
 LIBDIRS  := $(PORTLIBS) $(LIBNX)
 
