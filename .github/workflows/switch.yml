@@ -39,7 +39,7 @@ jobs:
               --enable-avcodec --enable-avformat --enable-swresample \
               --enable-decoder=opus,aac --enable-demuxer=matroska,mov --enable-parser=opus,aac 2>&1 | tail -15 | tee /tmp/ffconf.log || { tail -40 ffbuild/config.log | tee -a /tmp/ffconf.log; exit 1; }
             make -j4 > /tmp/ffbuild.log 2>&1 || { tail -60 /tmp/ffbuild.log | tee -a /tmp/ffconf.log; exit 1; }
-            make install > /dev/null
+            make install > /tmp/ffinstall.log 2>&1 || { tail -30 /tmp/ffinstall.log; exit 1; }
           fi
           ls -la ffmpeg-min/lib
       - name: Build background service (sysmodule)
@@ -97,6 +97,8 @@ jobs:
           cp /tmp/bg.log bg-build.log 2>/dev/null || true
           cp /tmp/bgtest.log bg-test.log 2>/dev/null || true
           cp /tmp/ffconf.log ffconf.log 2>/dev/null || true
+          tail -80 /tmp/ffbuild.log > ffbuild.log 2>/dev/null || true
+          tail -40 /tmp/ffinstall.log > ffinstall.log 2>/dev/null || true
           cp $GITHUB_WORKSPACE/ytmusic-switch/bg/ytmusic-bg.nsp . 2>/dev/null || true
           cp /tmp/shots/*.png . 2>/dev/null || true
           cp /tmp/ytmusic-data/log.txt host-applog.txt 2>/dev/null || true
