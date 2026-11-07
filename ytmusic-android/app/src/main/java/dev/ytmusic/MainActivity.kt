@@ -1029,6 +1029,7 @@ class MainActivity : Activity() {
                 Settings.audioQuality = i; sv.text = qualityLabel(); d.dismiss(); toast("Applies to songs that start from now on")
             }.show()
         }
+        toggle("Compatibility mode", "Turn on if nothing plays (e.g. Android on Switch). Slower, but works on more devices", { Settings.compatPlayback }, { Settings.compatPlayback = it; Yt.altFormat = false; toast("Applies to songs that start from now on") })
         toggle("Keep screen on", "While the full-screen player is open", { Settings.keepScreenOn }, { Settings.keepScreenOn = it })
 
         section("Downloads")

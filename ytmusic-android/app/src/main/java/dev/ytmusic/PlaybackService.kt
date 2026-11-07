@@ -12,11 +12,13 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.RenderersFactory
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.MediaCodecAudioRenderer
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -38,6 +40,7 @@ class PlaybackService : MediaSessionService() {
     private val main = Handler(Looper.getMainLooper())
     private var failuresInRow = 0
     private var retriedVid: String? = null
+    private var stage = 0
 
     private class Resolver : ResolvingDataSource.Resolver {
         override fun resolveDataSpec(dataSpec: DataSpec): DataSpec {
@@ -52,12 +55,17 @@ class PlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         // http(s) goes through the chunked YouTube reader, file: (downloads) through the default sources
-        val data = ResolvingDataSource.Factory(DefaultDataSource.Factory(this) { YtChunkedDataSource() }, Resolver())
+        val data = ResolvingDataSource.Factory(DefaultDataSource.Factory(this) {
+            if (Yt.compat) DefaultHttpDataSource.Factory().setUserAgent(dev.ytmusic.core.DownloaderImpl.USER_AGENT)
+                .setAllowCrossProtocolRedirects(true).createDataSource()
+            else YtChunkedDataSource()
+        }, Resolver())
         // Audio only, and only the containers YouTube audio comes in: smaller and quicker to start.
         // YouTube audio is fragmented ("dash") MP4 or WebM.
         val extractors = ExtractorsFactory { arrayOf(FragmentedMp4Extractor(), Mp4Extractor(), MatroskaExtractor()) }
         val renderers = RenderersFactory { handler, _, audioListener, _, _ ->
-            arrayOf(MediaCodecAudioRenderer(this, MediaCodecSelector.DEFAULT, handler, audioListener))
+            // decoder fallback + a plain PCM sink (no float / offload): odd audio stacks (Android ported to a Switch) choke on those
+            arrayOf(MediaCodecAudioRenderer(this, MediaCodecSelector.DEFAULT, true, handler, audioListener, DefaultAudioSink.Builder(this).build()))
         }
         val load = DefaultLoadControl.Builder()
             .setBufferDurationsMs(20_000, 60_000, 1_500, 3_000)
@@ -71,7 +79,7 @@ class PlaybackService : MediaSessionService() {
             .build()
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) = handleError(player, error)
-            override fun onIsPlayingChanged(isPlaying: Boolean) { if (isPlaying) { failuresInRow = 0; retriedVid = null } }
+            override fun onIsPlayingChanged(isPlaying: Boolean) { if (isPlaying) { if (stage >= 2 && !Settings.compatPlayback) Settings.compatPlayback = true; failuresInRow = 0; retriedVid = null; stage = 0 } }
         })
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         session = MediaSession.Builder(this, player).setSessionActivity(open).build()
@@ -80,19 +88,28 @@ class PlaybackService : MediaSessionService() {
     private fun handleError(player: ExoPlayer, error: PlaybackException) {
         val vid = player.currentMediaItem?.mediaId
         val http = generateSequence(error as Throwable) { it.cause }.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()
-        // An expired / rejected stream URL: resolve a fresh one and resume where we were, once per track.
-        if (vid != null && retriedVid != vid && (http != null || error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED)) {
-            retriedVid = vid
-            Yt.invalidate(vid)
-            val pos = player.currentPosition
-            player.seekTo(player.currentMediaItemIndex, pos)
-            player.prepare()
-            return
+        // Escalating self-repair, once per step per track:
+        //  1) fresh stream URL (expired / IP-bound URL)   2) compatibility mode (stock HTTP reader)
+        //  3) the other audio format (WebM/Opus instead of M4A/AAC)
+        if (vid != null) {
+            if (retriedVid != vid) { retriedVid = vid; stage = 0 }
+            if (stage < 3) {
+                stage++
+                when (stage) {
+                    2 -> Yt.compat = true
+                    3 -> Yt.altFormat = true
+                }
+                Yt.invalidate(vid)
+                val pos = player.currentPosition
+                player.seekTo(player.currentMediaItemIndex, pos)
+                player.prepare()
+                return
+            }
         }
         Crash.record("playback ${vid ?: ""}", error)
         failuresInRow++
         val title = player.currentMediaItem?.mediaMetadata?.title ?: "track"
-        main.post { Toast.makeText(this, "Couldn't play “$title”", Toast.LENGTH_SHORT).show() }
+        main.post { Toast.makeText(this, "Couldn't play “$title” (${error.errorCodeName})", Toast.LENGTH_SHORT).show() }
         if (player.hasNextMediaItem() && failuresInRow < 5) {
             player.seekToNextMediaItem()
             player.prepare()

@@ -26,6 +26,12 @@ object Yt {
     @Volatile var targetKbps = 128
         set(v) { if (v != field) { field = v; urlCache.clear() } }
 
+    /** Compatibility mode: plain HTTP reads instead of the chunked reader (see the app's PlaybackService). */
+    @Volatile var compat = false
+    /** Prefer WebM/Opus over M4A/AAC. Playback falls back to this when a device can't decode the AAC stream. */
+    @Volatile var altFormat = false
+        set(v) { if (v != field) { field = v; urlCache.clear() } }
+
     val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
@@ -161,7 +167,7 @@ object Yt {
             .ifEmpty { streams.filter { it.audioLocale?.language == "en" } }
             .ifEmpty { streams }
         val m4a = langPool.filter { it.format?.suffix == "m4a" }
-        val pool = m4a.ifEmpty { langPool }
+        val pool = if (altFormat) langPool.filter { it.format?.suffix != "m4a" }.ifEmpty { langPool } else m4a.ifEmpty { langPool }
         // closest to 128 kbps, preferring the higher one on ties
         val best: AudioStream = if (targetKbps <= 0) pool.maxByOrNull { it.averageBitrate }!! else pool.minByOrNull { kotlin.math.abs(it.averageBitrate - targetKbps) * 2 - if (it.averageBitrate >= targetKbps) 1 else 0 }!!
         val url = best.content

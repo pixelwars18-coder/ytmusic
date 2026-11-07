@@ -17,6 +17,7 @@ class App : Application() {
         C.apply(getSharedPreferences("ui", MODE_PRIVATE).getString("theme", "midnight") ?: "midnight")
         Crash.install(this)
         Settings.applyQuality()
+        Settings.applyCompat()
         Store.init(this)
         Thumbs.init(this)
         ForYou.init(this)

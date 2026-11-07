@@ -29,6 +29,13 @@ object Settings {
 
     fun applyQuality() { dev.ytmusic.core.Yt.targetKbps = when (audioQuality) { 0 -> 48; 2 -> 0; else -> 128 } }
 
+    /** Compatibility mode: stock HTTP reader instead of the chunked one. For devices where nothing plays. */
+    var compatPlayback: Boolean
+        get() = prefs().getBoolean("compat", false)
+        set(v) { prefs().edit().putBoolean("compat", v).apply(); applyCompat() }
+
+    fun applyCompat() { dev.ytmusic.core.Yt.compat = compatPlayback }
+
     /** Tab to open on launch; "LAST" restores the one used last. */
     var startTab: String
         get() = prefs().getString("startTab", "LAST") ?: "LAST"
