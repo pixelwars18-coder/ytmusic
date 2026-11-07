@@ -11,8 +11,8 @@ android {
         applicationId = "dev.ytmusic.player"
         minSdk = 22      // Fire OS 5 and newer
         targetSdk = 30   // Fire OS 8 is Android 11; avoids newer-Android permission / FGS-type hurdles
-        versionCode = 20
-        versionName = "1.19"
+        versionCode = 21
+        versionName = "1.20"
     }
 
     // The signing key is not part of the repository (anyone holding it can publish updates that install over
