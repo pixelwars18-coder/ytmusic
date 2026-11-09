@@ -226,4 +226,10 @@ private:
     bool retried = false;
     QString waitingVid;      // track whose URL we are resolving right now
     bool loaded = false;
+
+    // Finished searches are kept for a while: repeating one (history chips, switching Songs / Playlists
+    // back and forth, "More from <artist>" twice) shows its results at once instead of re-running yt-dlp.
+    struct CachedSearch { QVector<Track> tracks; QVector<PlaylistRef> playlists; int limit = 0; qint64 at = 0; };
+    QHash<QString, CachedSearch> searchCache;
+    static QString searchKey(const QString &q, bool playlists) { return (playlists ? QStringLiteral("p\n") : QStringLiteral("s\n")) + q.toLower(); }
 };

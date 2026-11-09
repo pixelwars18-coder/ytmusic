@@ -1,6 +1,5 @@
 #include "ui_common.h"
 #include "thumbs.h"
-#include <QPainterPath>
 #include <QWidget>
 
 namespace UI {
@@ -68,40 +67,42 @@ void drawSpinner(QPainter &p, const QRectF &r, const QColor &c, qint64 ms) {
     p.restore();
 }
 
-void drawThumb(QPainter &p, const QRectF &r, const QString &vid, qreal radius) {
+// Thumbnails arrive from the cache already cropped and round-cornered, so this is a plain blit
+// (no clip path per row); the placeholder is only drawn until the image is ready.
+static void drawThumbPlaceholder(QPainter &p, const QRectF &r, qreal radius, const QString &icon) {
     const Palette &c = P();
-    QPainterPath path;
-    path.addRoundedRect(r, radius, radius);
     p.save();
     p.setRenderHint(QPainter::Antialiasing);
-    p.fillPath(path, c.surfaceVariant);
-    if (!vid.isEmpty()) {
-        const QPixmap pm = Thumbs::I().get(vid, r.size().toSize(), p.device()->devicePixelRatioF());
-        if (!pm.isNull()) {
-            p.setClipPath(path);
-            p.drawPixmap(r.topLeft(), pm);
-        }
-    } else {
-        Icons::paint(p, QRectF(r.center().x() - 14, r.center().y() - 14, 28, 28), QStringLiteral("music"), c.outline);
+    p.setPen(Qt::NoPen);
+    p.setBrush(c.surfaceVariant);
+    p.drawRoundedRect(r, radius, radius);
+    if (!icon.isEmpty()) {
+        const qreal s = qMin<qreal>(28, qMin(r.width(), r.height()) * 0.5);
+        Icons::paint(p, QRectF(r.center().x() - s / 2, r.center().y() - s / 2, s, s), icon, c.outline);
     }
     p.restore();
 }
 
-void drawThumbUrl(QPainter &p, const QRectF &r, const QString &key, const QString &url, qreal radius) {
-    const Palette &c = P();
-    QPainterPath path;
-    path.addRoundedRect(r, radius, radius);
-    p.save();
-    p.setRenderHint(QPainter::Antialiasing);
-    p.fillPath(path, c.surfaceVariant);
-    const QPixmap pm = url.isEmpty() ? QPixmap() : Thumbs::I().getUrl(key, url, r.size().toSize(), p.device()->devicePixelRatioF());
-    if (!pm.isNull()) {
-        p.setClipPath(path);
-        p.drawPixmap(r.topLeft(), pm);
-    } else {
-        Icons::paint(p, QRectF(r.center().x() - 14, r.center().y() - 14, 28, 28), QStringLiteral("list"), c.outline);
+void drawThumb(QPainter &p, const QRectF &r, const QString &vid, qreal radius) {
+    if (!vid.isEmpty()) {
+        const QPixmap pm = Thumbs::I().get(vid, r.size().toSize(), p.device()->devicePixelRatioF(), radius);
+        if (!pm.isNull()) {
+            p.drawPixmap(r.topLeft(), pm);
+            return;
+        }
     }
-    p.restore();
+    drawThumbPlaceholder(p, r, radius, vid.isEmpty() ? QStringLiteral("music") : QString());
+}
+
+void drawThumbUrl(QPainter &p, const QRectF &r, const QString &key, const QString &url, qreal radius) {
+    if (!url.isEmpty()) {
+        const QPixmap pm = Thumbs::I().getUrl(key, url, r.size().toSize(), p.device()->devicePixelRatioF(), radius);
+        if (!pm.isNull()) {
+            p.drawPixmap(r.topLeft(), pm);
+            return;
+        }
+    }
+    drawThumbPlaceholder(p, r, radius, QStringLiteral("list"));
 }
 
 } // namespace UI
