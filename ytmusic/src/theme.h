@@ -5,7 +5,7 @@
 #include <QTimer>
 
 struct Palette {
-    QColor primary{"#fff59b"}, onPrimary{"#0e0e43"}, secondary{"#a9aefe"}, tertiary{"#9BFECE"};
+    QColor accent{"#fff59b"}, primary{"#fff59b"}, onPrimary{"#0e0e43"}, secondary{"#a9aefe"}, tertiary{"#9BFECE"};
     QColor surface{"#070722"}, surfaceVariant{"#11112d"}, onSurface{"#f3edf7"};
     QColor onSurfaceVariant{"#7c80b4"}, outline{"#21215F"}, error{"#fd4663"};
 };
@@ -17,12 +17,14 @@ class Theme : public QObject {
 public:
     static Theme &I();
     const Palette &p() const { return pal; }
+    bool official() const { return officialLook; }
 signals:
     void changed();
 private:
     Theme();
     void reload();
     Palette pal;
+    bool officialLook = true;
     QFileSystemWatcher watcher;
     QTimer debounce;
     QString file;

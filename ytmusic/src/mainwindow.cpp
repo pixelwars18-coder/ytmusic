@@ -120,7 +120,7 @@ void SearchBox::paintEvent(QPaintEvent *) {
     fill.setAlphaF(focus ? 0.13 : 0.08);
     p.setBrush(fill);
     p.setPen(focus ? QPen(c.primary, 2) : Qt::NoPen);
-    p.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), 25, 25);
+    p.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), Theme::I().official() ? 12 : 25, Theme::I().official() ? 12 : 25);
     Icons::paint(p, QRectF(18, 15, 20, 20), QStringLiteral("search"), c.onSurfaceVariant);
     if (!edit->text().isEmpty()) drawIconButton(p, clearRect(), QStringLiteral("x"), hover == 1);
     drawIconButton(p, goRect(), QStringLiteral("search"), false, true);
@@ -193,7 +193,7 @@ QVector<SideBar::Item> SideBar::items() const {
         v.append({QRectF(x, y, w, kNavH), Nav, int(t), label, icon, QString(), count > 0 ? QString::number(count) : QString(), active});
         y += kNavH + kNavGap;
     };
-    nav(Tab::Home, QStringLiteral("For you"), QStringLiteral("home"), 0);
+    nav(Tab::Home, QStringLiteral("Home"), QStringLiteral("home"), 0);
     nav(Tab::Results, QStringLiteral("Search"), QStringLiteral("search"), 0);
     nav(Tab::Queue, QStringLiteral("Queue"), QStringLiteral("list"), int(core->queue.size()));
     nav(Tab::Liked, QStringLiteral("Liked songs"), QStringLiteral("heart"), int(core->liked.size()));
@@ -224,21 +224,35 @@ void SideBar::paintEvent(QPaintEvent *) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
     const Palette &c = P();
-    QColor panel = Qt::black;
-    panel.setAlphaF(0.28);
     p.setPen(Qt::NoPen);
-    p.setBrush(panel);
-    p.drawRoundedRect(QRectF(rect()), 22, 22);
+    if (!Theme::I().official()) {
+        QColor panel = Qt::black;
+        panel.setAlphaF(0.28);
+        p.setBrush(panel);
+        p.drawRoundedRect(QRectF(rect()), 22, 22);
+    }
 
-    // brand
-    const QRectF logo(compact ? (width() - 34) / 2.0 : 16, 14, 34, 34);
-    p.setBrush(c.primary);
-    p.drawRoundedRect(logo, 11, 11);
-    Icons::paint(p, logo.adjusted(8, 8, -8, -8), QStringLiteral("music"), c.onPrimary);
+    // brand: the YouTube Music mark (red disc, white ring, white play triangle) + wordmark
+    const QRectF logo(compact ? (width() - 30) / 2.0 : 18, 16, 30, 30);
+    if (Theme::I().official()) {
+        p.setBrush(c.accent);
+        p.drawEllipse(logo);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(Qt::white, 1.6));
+        p.drawEllipse(logo.adjusted(4.5, 4.5, -4.5, -4.5));
+        p.setPen(Qt::NoPen);
+        p.setBrush(Qt::white);
+        const QPointF m = logo.center();
+        p.drawPolygon(QPolygonF({QPointF(m.x() - 3.2, m.y() - 4.8), QPointF(m.x() - 3.2, m.y() + 4.8), QPointF(m.x() + 5, m.y())}));
+    } else {
+        p.setBrush(c.primary);
+        p.drawRoundedRect(logo, 10, 10);
+        Icons::paint(p, logo.adjusted(7, 7, -7, -7), QStringLiteral("music"), c.onPrimary);
+    }
     if (!compact) {
         p.setPen(c.onSurface);
-        p.setFont(fnt(16, QFont::Bold));
-        p.drawText(QRectF(logo.right() + 10, logo.top(), width() - logo.right() - 18, logo.height()), Qt::AlignVCenter, QStringLiteral("YT Music"));
+        p.setFont(fnt(18, QFont::Bold));
+        p.drawText(QRectF(logo.right() + 8, logo.top(), width() - logo.right() - 18, logo.height()), Qt::AlignVCenter, QStringLiteral("Music"));
     }
 
     const auto its = items();
@@ -262,14 +276,11 @@ void SideBar::paintEvent(QPaintEvent *) {
         p.save();
         if (it.kind == Playlist) p.setClipRect(area);
         p.setPen(Qt::NoPen);
-        if (it.active) {
-            QColor a = c.primary;
-            a.setAlphaF(0.15);
-            p.setBrush(a);
-            p.drawRoundedRect(it.r, 12, 12);
-        } else if (hov) {
-            p.setBrush(c.outline);
-            p.drawRoundedRect(it.r, 12, 12);
+        if (it.active || hov) {
+            QColor a = Theme::I().official() ? QColor(255, 255, 255) : c.primary;
+            a.setAlphaF(Theme::I().official() ? (it.active ? 0.14 : 0.08) : (it.active ? 0.15 : 0.0));
+            p.setBrush(it.active || Theme::I().official() ? a : c.outline);
+            p.drawRoundedRect(it.r, 10, 10);
         }
         const QColor fg = it.active ? c.primary : c.onSurface;
         const qreal cy = it.r.center().y();
@@ -410,7 +421,7 @@ QVector<TabsBar::Item> TabsBar::items() const {
     else if (savedOpen) title = core->savedOpen() ? core->savedOpen()->name : QString();
     else {
         switch (tab) {
-        case Tab::Home: title = QStringLiteral("For you"); break;
+        case Tab::Home: title = QStringLiteral("Home"); break;
         case Tab::Results: title = QStringLiteral("Search"); break;
         case Tab::Queue: title = QStringLiteral("Queue"); break;
         case Tab::Liked: title = QStringLiteral("Liked songs"); break;
@@ -690,36 +701,13 @@ void MainWindow::paintEvent(QPaintEvent *) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
     const Palette &c = P();
-    // near-black base (YT Music) with the Noctalia hue showing through, and a soft colour glow
-    // pouring down from the top edge (Spotube / YT Music home)
-    auto mix = [](const QColor &a, const QColor &b, qreal t) {
-        return QColor::fromRgbF(a.redF() * (1 - t) + b.redF() * t, a.greenF() * (1 - t) + b.greenF() * t,
-                                a.blueF() * (1 - t) + b.blueF() * t, a.alphaF());
-    };
-    QColor bg = mix(c.surface, Qt::black, 0.80);   // almost black, only a hint of the Noctalia hue
-    bg.setAlphaF(0.97);
+    // flat YT Music black; the Noctalia look keeps its tinted base
     const QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+    QColor bg = c.surface;
+    bg.setAlphaF(0.97);
     p.setBrush(bg);
-    p.setPen(Qt::NoPen);
-    p.drawRoundedRect(r, 24, 24);
-    // the glow takes the colour of whatever is playing (falls back to the Noctalia accent)
-    QColor art = Thumbs::I().accent(core->nowVid());
-    if (!art.isValid()) art = mix(c.secondary, c.primary, 0.25);
-    QLinearGradient glow(0, 0, 0, height() * 0.92);
-    QColor g0 = mix(art, c.secondary, 0.15);
-    g0.setAlphaF(0.62);
-    QColor g1 = g0;
-    g1.setAlphaF(0.0);
-    QColor gm = g0;
-    gm.setAlphaF(0.20);
-    glow.setColorAt(0, g0);
-    glow.setColorAt(0.45, gm);
-    glow.setColorAt(1, g1);
-    p.setBrush(glow);
-    p.drawRoundedRect(r, 24, 24);
-    p.setBrush(Qt::NoBrush);
     p.setPen(QPen(c.outline, 1));
-    p.drawRoundedRect(r, 24, 24);
+    p.drawRoundedRect(r, 16, 16);
 }
 
 // -------------------------------------------------- frameless move / resize
