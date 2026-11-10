@@ -528,7 +528,7 @@ void TrackList::paintEvent(QPaintEvent *) {
         if (active) {
             p.setPen(Qt::NoPen);
             p.setBrush(QColor(8, 8, 32, 165));
-            p.drawRoundedRect(th, Theme::I().official() ? 6 : 12, Theme::I().official() ? 6 : 12);
+            p.drawRoundedRect(th, 12, 12);
             Icons::paint(p, QRectF(th.center().x() - 10, th.center().y() - 10, 20, 20),
                          core->paused ? QStringLiteral("play") : QStringLiteral("music"), c.primary);
         }
@@ -598,7 +598,7 @@ void TrackList::rebuildFeed() {
     int y = 0;
     feedItems.append({3, -1, -1, y, 52, 0, vw});   // mood chips
     y += 52;
-    if (!Theme::I().official() && !feedSecs.isEmpty() && !feedSecs[0].tracks.isEmpty()) {   // big "listen again" banner
+    if (!feedSecs.isEmpty() && !feedSecs[0].tracks.isEmpty()) {   // big "listen again" banner
         const int hh = qBound(190, vw * 11 / 40, 250);
         feedItems.append({4, 0, 0, y, hh, 0, vw});
         y += hh + 14;
@@ -716,7 +716,7 @@ void TrackList::paintFeed(QPainter &p) {
                 fill.setAlphaF(h ? 0.20 : 0.10);
                 p.setPen(Qt::NoPen);
                 p.setBrush(fill);
-                p.drawRoundedRect(r, Theme::I().official() ? 8 : 11, Theme::I().official() ? 8 : 11);
+                p.drawRoundedRect(r, 11, 11);
                 p.setPen(c.onSurface);
                 p.drawText(r, Qt::AlignCenter, moods()[k]);
             }
@@ -803,18 +803,17 @@ void TrackList::paintFeed(QPainter &p) {
         const bool active = t.vid == nowVid;
         const bool cardHover = hover.idx == i && hover.kind != None;
         const QRectF th(it.x, y, it.w, feedThumbH);
-        drawThumb(p, th, t.vid, Theme::I().official() ? 6 : 12);
+        drawThumb(p, th, t.vid, 12);
         if (!active && !cardHover) {
             drawDlBadge(p, th, t.vid);
         }
         if (active || cardHover) {
             p.setPen(Qt::NoPen);
             p.setBrush(QColor(0, 0, 0, cardHover ? 90 : 150));
-            p.drawRoundedRect(th, Theme::I().official() ? 6 : 12, Theme::I().official() ? 6 : 12);
+            p.drawRoundedRect(th, 12, 12);
         }
         if (cardHover) {
-            const QRectF pc = Theme::I().official() ? QRectF(th.center().x() - 24, th.center().y() - 24, 48, 48)
-                                                  : QRectF(th.right() - 14 - 44, th.bottom() - 14 - 44, 44, 44);
+            const QRectF pc(th.right() - 14 - 44, th.bottom() - 14 - 44, 44, 44);
             p.setPen(Qt::NoPen);
             p.setBrush(c.primary);
             p.drawEllipse(pc);

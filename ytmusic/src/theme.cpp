@@ -10,25 +10,7 @@ Theme &Theme::I() {
     return t;
 }
 
-static Palette officialPalette() {
-    Palette p;   // the colours of music.youtube.com's dark theme
-    p.accent = QColor("#ff0033");
-    p.primary = QColor("#ffffff");
-    p.onPrimary = QColor("#030303");
-    p.secondary = QColor("#aaaaaa");
-    p.tertiary = QColor("#ffffff");
-    p.surface = QColor("#030303");
-    p.surfaceVariant = QColor("#212121");
-    p.onSurface = QColor("#ffffff");
-    p.onSurfaceVariant = QColor("#aaaaaa");
-    p.outline = QColor("#303030");
-    p.error = QColor("#ff4e45");
-    return p;
-}
-
 Theme::Theme() {
-    officialLook = qgetenv("YTMUSIC_LOOK") != "noctalia";
-    if (officialLook) pal = officialPalette();
     file = Paths::stateDir() + QStringLiteral("/theme.json");
     QDir().mkpath(Paths::stateDir());
     debounce.setSingleShot(true);
@@ -42,7 +24,6 @@ Theme::Theme() {
 }
 
 void Theme::reload() {
-    if (officialLook) { emit changed(); return; }   // fixed palette; theme.json only drives the Noctalia look
     if (!watcher.files().contains(file) && QFile::exists(file)) watcher.addPath(file);
     QFile f(file);
     if (!f.open(QIODevice::ReadOnly)) return;
@@ -63,7 +44,6 @@ void Theme::reload() {
     get("mOnSurfaceVariant", n.onSurfaceVariant);
     get("mOutline", n.outline);
     get("mError", n.error);
-    n.accent = n.primary;
     pal = n;
     emit changed();
 }

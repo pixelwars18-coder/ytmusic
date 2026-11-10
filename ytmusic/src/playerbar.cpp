@@ -16,35 +16,37 @@ PlayerBar::PlayerBar(Core *c, QWidget *parent) : QWidget(parent), core(c) {
 
 PlayerBar::Layout PlayerBar::layout() const {
     Layout l;
-    const qreal W = width(), H = height(), pad = 18;
-    const qreal cy = (6 + H) / 2.0;   // controls sit just below the seek line
-    // Like music.youtube.com: transport + time on the left, the song after that,
-    // queue / lyrics / shuffle / repeat / volume on the right.
-    qreal x = pad;
-    auto place = [&](qreal w) { QRectF r(x, cy - w / 2, w, w); x += w + 6; return r; };
+    const qreal W = width(), H = height(), pad = 16;
+    const qreal cy = (12 + H) / 2.0;   // controls sit below the seek line
+    // The song block and the volume slider give way first when the window is narrow.
+    const qreal infoW = qBound<qreal>(190, W * 0.27, 320);
+    l.thumb = QRectF(pad, cy - 30, 60, 60);
+    l.heart = QRectF(pad + infoW - 34, cy - 17, 34, 34);
+    l.text = QRectF(l.thumb.right() + 12, cy - 30, l.heart.left() - l.thumb.right() - 20, 60);
+
+    const qreal volW = W < 900 ? 110 : 190;
+    l.volArea = QRectF(W - pad - volW, 0, volW, H);
+    l.mute = QRectF(l.volArea.left(), cy - 17, 34, 34);
+    l.volPct = W < 900 ? QRectF() : QRectF(l.volArea.right() - 30, 0, 30, H);
+    const qreal volRight = W < 900 ? l.volArea.right() : l.volPct.left() - 8;
+    l.volBar = QRectF(l.mute.right() + 8, cy - 9, volRight - l.mute.right() - 8, 18);
+    l.queue = QRectF(l.volArea.left() - 6 - 34, cy - 17, 34, 34);
+    l.lyrics = QRectF(l.queue.left() - 2 - 34, cy - 17, 34, 34);
+
+    const qreal cx0 = pad + infoW + 20, cx1 = l.lyrics.left() - 16;
+    const qreal cx = (cx0 + cx1) / 2;
+    const qreal total = 34 + 40 + 48 + 40 + 34 + 4 * 8;
+    qreal x = cx - total / 2;
+    auto place = [&](qreal w) { QRectF r(x, cy - w / 2, w, w); x += w + 8; return r; };
+    l.shuffle = place(34);
     l.prev = place(40);
     l.play = place(48);
     l.next = place(40);
-    l.timeL = QRectF(x + 6, cy - 9, 92, 18);
+    l.repeat = place(34);
+
+    // YT Music style: the seek line runs along the top edge, "0:00 / 4:23" sits beside the controls
+    l.timeL = QRectF(l.repeat.right() + 10, cy - 9, 84, 18);
     l.timeR = QRectF();
-    x = l.timeL.right() + 18;
-
-    const qreal volW = W < 900 ? 84 : 128;
-    l.volArea = QRectF(W - pad - volW - 34, 0, volW + 34, H);
-    l.mute = QRectF(l.volArea.left(), cy - 17, 34, 34);
-    l.volPct = QRectF();
-    l.volBar = QRectF(l.mute.right() + 6, cy - 9, volW - 6, 18);
-    l.repeat = QRectF(l.volArea.left() - 4 - 34, cy - 17, 34, 34);
-    l.shuffle = QRectF(l.repeat.left() - 2 - 34, cy - 17, 34, 34);
-    l.queue = QRectF(l.shuffle.left() - 8 - 34, cy - 17, 34, 34);
-    l.lyrics = QRectF(l.queue.left() - 2 - 34, cy - 17, 34, 34);
-
-    const qreal infoEnd = l.lyrics.left() - 18;
-    l.thumb = QRectF(x, cy - 28, 56, 56);
-    l.heart = QRectF(qMax(l.thumb.right() + 90, infoEnd - 34), cy - 17, 34, 34);
-    l.text = QRectF(l.thumb.right() + 12, cy - 28, qMax<qreal>(40, l.heart.left() - l.thumb.right() - 18), 56);
-
-    // the seek line runs along the top edge of the bar
     l.seek = QRectF(0, 0, W, 12);
     return l;
 }
@@ -127,21 +129,21 @@ void PlayerBar::paintEvent(QPaintEvent *) {
     const Palette &c = P();
     const Layout l = layout();
 
-    {   // docked flat bar (YT Music: #212121); rounded only where it meets the window corners
-        QColor bgc = c.surfaceVariant;
-        if (!Theme::I().official()) { bgc = Qt::black; bgc.setAlphaF(0.55); }
+    {   // docked, flat black glass: rounded only where it meets the window corners
+        QColor bgc = Qt::black;
+        bgc.setAlphaF(0.55);
         p.setPen(Qt::NoPen);
         p.setBrush(bgc);
-        p.drawRoundedRect(QRectF(0, -40, width(), height() + 40), 16, 16);
+        p.drawRoundedRect(QRectF(0, -40, width(), height() + 40), 24, 24);
     }
 
     // now playing
     const Track *t = core->nowPlaying();
-    drawThumb(p, l.thumb, t ? t->vid : QString(), 4);
+    drawThumb(p, l.thumb, t ? t->vid : QString(), 10);
     if (hover == Info) {   // the song block opens the now-playing screen
         p.setPen(Qt::NoPen);
         p.setBrush(QColor(8, 8, 32, 150));
-        p.drawRoundedRect(l.thumb, 4, 4);
+        p.drawRoundedRect(l.thumb, 10, 10);
         Icons::paint(p, QRectF(l.thumb.center().x() - 11, l.thumb.center().y() - 11, 22, 22), QStringLiteral("up"), c.onSurface);
     }
     p.setPen(c.onSurface);
@@ -161,11 +163,7 @@ void PlayerBar::paintEvent(QPaintEvent *) {
     // transport
     drawIconButton(p, l.shuffle, QStringLiteral("shuffle"), hover == Shuffle, false, core->shuffle);
     drawIconButton(p, l.prev, QStringLiteral("prev"), hover == Prev);
-    const QString playIcon = (core->paused || core->idle) ? QStringLiteral("play") : QStringLiteral("pause");
-    if (Theme::I().official())   // a bare white triangle, no disc
-        Icons::paint(p, QRectF(l.play.center().x() - 18, l.play.center().y() - 18, 36, 36), playIcon, c.onSurface, true);
-    else
-        drawIconButton(p, l.play, playIcon, false, true);
+    drawIconButton(p, l.play, (core->paused || core->idle) ? QStringLiteral("play") : QStringLiteral("pause"), false, true);
     drawIconButton(p, l.next, QStringLiteral("next"), hover == Next);
     drawIconButton(p, l.repeat, QStringLiteral("repeat"), hover == Repeat, false, core->repeat > 0, false,
                    core->repeat == Core::RepeatOne ? QStringLiteral("1") : QString());
@@ -189,7 +187,7 @@ void PlayerBar::paintEvent(QPaintEvent *) {
     };
     const bool seekActive = hover == SeekBar || dragging == SeekBar;
     slider(QRectF(l.seek.left(), seekActive ? 3 : 2, l.seek.width(), 0), core->duration > 0 ? core->position / core->duration : 0,
-           c.accent, seekActive, seekActive ? 5 : 3);
+           c.primary, seekActive, seekActive ? 5 : 3);
 
     // now-playing screen, queue
     drawIconButton(p, l.lyrics, QStringLiteral("lyrics"), hover == Lyrics);

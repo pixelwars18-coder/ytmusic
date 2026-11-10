@@ -264,19 +264,13 @@ void LyricsView::paintEvent(QPaintEvent *) {
     p.setRenderHint(QPainter::SmoothPixmapTransform);
     const Palette &c = P();
     p.setPen(Qt::NoPen);
-    {   // black base; the wash takes the playing song's artwork colour, as on the official player page
-        const bool off = Theme::I().official();
-        QColor base = off ? c.surface : QColor::fromRgbF(c.surface.redF() * 0.58, c.surface.greenF() * 0.58, c.surface.blueF() * 0.58);
+    {   // deep base with a colour wash from the top, so it matches the window glow instead of being a flat slab
+        QColor base = QColor::fromRgbF(c.surface.redF() * 0.58, c.surface.greenF() * 0.58, c.surface.blueF() * 0.58);
         p.setBrush(base);
         p.drawRoundedRect(rect(), 22, 22);
-        QColor g0 = c.secondary;
-        if (off) {
-            const QColor art = Thumbs::I().accent(core->nowVid());
-            if (art.isValid()) g0 = QColor::fromHsvF(art.hsvHueF() < 0 ? 0 : art.hsvHueF(), art.hsvSaturationF() * 0.8, art.valueF() * 0.55);
-        }
         QLinearGradient g(0, 0, 0, height());
-        QColor g1 = g0;
-        g0.setAlphaF(off ? 0.85 : 0.30);
+        QColor g0 = c.secondary, g1 = c.primary;
+        g0.setAlphaF(0.30);
         g1.setAlphaF(0.0);
         g.setColorAt(0, g0);
         g.setColorAt(1, g1);
