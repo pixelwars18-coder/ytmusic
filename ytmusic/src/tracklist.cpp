@@ -598,8 +598,9 @@ void TrackList::rebuildFeed() {
     int y = 0;
     feedItems.append({3, -1, -1, y, 52, 0, vw});   // mood chips
     y += 52;
-    feedItems.append({0, -1, -1, y, 26, 0, vw});
-    y += 30;
+    const bool status = core->feedBuilding || core->feed.isEmpty();   // otherwise no status line
+    feedItems.append({0, -1, -1, y, status ? 26 : 0, 0, vw});
+    y += status ? 30 : 4;
     for (int s = 0; s < feedSecs.size(); ++s) {
         feedItems.append({1, s, -1, y, 66, 0, vw});
         y += 66;
@@ -715,6 +716,7 @@ void TrackList::paintFeed(QPainter &p) {
             }
             continue;
         }
+        if (it.kind == 0 && it.h == 0) continue;
         if (it.kind == 0) { // status line under the page title
             p.setFont(fnt(13));
             p.setPen(core->feedBuilding ? c.tertiary : c.onSurfaceVariant);

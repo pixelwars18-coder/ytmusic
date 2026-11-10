@@ -264,8 +264,19 @@ void LyricsView::paintEvent(QPaintEvent *) {
     p.setRenderHint(QPainter::SmoothPixmapTransform);
     const Palette &c = P();
     p.setPen(Qt::NoPen);
-    p.setBrush(c.surface);
-    p.drawRoundedRect(rect(), 22, 22);
+    {   // deep base with a colour wash from the top, so it matches the window glow instead of being a flat slab
+        QColor base = QColor::fromRgbF(c.surface.redF() * 0.58, c.surface.greenF() * 0.58, c.surface.blueF() * 0.58);
+        p.setBrush(base);
+        p.drawRoundedRect(rect(), 22, 22);
+        QLinearGradient g(0, 0, 0, height());
+        QColor g0 = c.secondary, g1 = c.primary;
+        g0.setAlphaF(0.30);
+        g1.setAlphaF(0.0);
+        g.setColorAt(0, g0);
+        g.setColorAt(1, g1);
+        p.setBrush(g);
+        p.drawRoundedRect(rect(), 22, 22);
+    }
 
     const Track *t = core->nowPlaying();
     const bool wide = split();
