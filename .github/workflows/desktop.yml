@@ -8,7 +8,7 @@ on:
     paths: ['ytmusic/**', '.github/workflows/desktop.yml']
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write   # results (log + screenshots) go to the desktop-ci branch
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -72,10 +72,15 @@ jobs:
           YTMUSIC_SHOT_LYRICS=1 shot now-playing 1
           shot search 0 "daft punk"
           ls -la /tmp/shots
-      - uses: actions/upload-artifact@v4
+      - name: Publish result to the desktop-ci branch
         if: always()
-        with:
-          name: desktop
-          path: |
-            /tmp/shots/*.png
-            /tmp/build.log
+        shell: bash
+        run: |
+          sha=$(git -C "$GITHUB_WORKSPACE" rev-parse --short HEAD)
+          mkdir -p /tmp/out && cd /tmp/out
+          cp /tmp/shots/*.png . 2>/dev/null || true
+          cp /tmp/build.log . 2>/dev/null || true
+          echo "${sha} ${{ job.status }} ${{ github.event_name }} ${{ github.head_ref || github.ref_name }}" > status.txt
+          git init -q && git checkout -q -b desktop-ci
+          git add -A && git -c user.name=ci -c user.email=ci@localhost commit -q -m "CI ${sha}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" desktop-ci

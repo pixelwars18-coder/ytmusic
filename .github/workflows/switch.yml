@@ -3,7 +3,7 @@ on:
   push:
     branches: [switch, main]
     paths: ['ytmusic-switch/**', '.github/workflows/switch.yml']
-  # Pull requests: same build and screenshots, kept as a run artifact instead of the switch-ci branch.
+  # Pull requests: same build and screenshots; the results go to the switch-ci branch like any other run.
   pull_request:
     paths: ['ytmusic-switch/**', '.github/workflows/switch.yml']
   workflow_dispatch:
@@ -86,21 +86,8 @@ jobs:
           { g++ -std=gnu++20 -O1 -o /tmp/host_ui tests/host_ui.cpp $(ls source/*.cpp | grep -v main.cpp) \
               $(pkg-config --cflags --libs libcurl libavformat libavcodec libswresample libavutil sdl2 SDL2_ttf SDL2_image) -lpthread \
             && cd /tmp/shots && SDL_AUDIODRIVER=disk SDL_DISKAUDIODELAY=40 timeout 120 /tmp/host_ui; } 2>&1 | tee /tmp/ui.log
-      - name: Keep the logs and screenshots with the run
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: switch
-          path: |
-            /tmp/shots/*.png
-            /tmp/build.log
-            /tmp/bg.log
-            /tmp/host.log
-            /tmp/bgtest.log
-            /tmp/ui.log
-            ytmusic-switch/*.nro
       - name: Publish result
-        if: always() && github.event_name != 'pull_request'
+        if: always()
         shell: bash
         run: |
           git config --global --add safe.directory '*'
