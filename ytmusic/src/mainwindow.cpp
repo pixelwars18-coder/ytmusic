@@ -186,7 +186,7 @@ QVector<SideBar::Item> SideBar::items() const {
     const bool plOpen = tab == Tab::Saved && !core->savedOpenId.isEmpty();
     auto nav = [&](Tab t, const QString &label, const QString &icon, int count) {
         // an opened playlist is highlighted in the list below instead (unless that list is hidden)
-        const bool active = tab == t && !(t == Tab::Saved && plOpen && !compact);
+        const bool active = tab == t && !nowPlayingOpen && !(t == Tab::Saved && plOpen && !compact);
         v.append({QRectF(x, y, w, kNavH), Nav, int(t), label, icon, QString(), count > 0 ? QString::number(count) : QString(), active});
         y += kNavH + kNavGap;
     };
@@ -685,11 +685,30 @@ void MainWindow::paintEvent(QPaintEvent *) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
     const Palette &c = P();
-    QColor bg = c.surface;
-    bg.setAlphaF(0.94);
+    // near-black base (YT Music) with the Noctalia hue showing through, and a soft colour glow
+    // pouring down from the top edge (Spotube / YT Music home)
+    auto mix = [](const QColor &a, const QColor &b, qreal t) {
+        return QColor::fromRgbF(a.redF() * (1 - t) + b.redF() * t, a.greenF() * (1 - t) + b.greenF() * t,
+                                a.blueF() * (1 - t) + b.blueF() * t, a.alphaF());
+    };
+    QColor bg = mix(c.surface, Qt::black, 0.42);
+    bg.setAlphaF(0.96);
+    const QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
     p.setBrush(bg);
+    p.setPen(Qt::NoPen);
+    p.drawRoundedRect(r, 24, 24);
+    QLinearGradient glow(0, 0, 0, qMin<qreal>(height() * 0.75, 460));
+    QColor g0 = mix(c.secondary, c.primary, 0.25);
+    g0.setAlphaF(0.34);
+    QColor g1 = g0;
+    g1.setAlphaF(0.0);
+    glow.setColorAt(0, g0);
+    glow.setColorAt(1, g1);
+    p.setBrush(glow);
+    p.drawRoundedRect(r, 24, 24);
+    p.setBrush(Qt::NoBrush);
     p.setPen(QPen(c.outline, 1));
-    p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 24, 24);
+    p.drawRoundedRect(r, 24, 24);
 }
 
 // -------------------------------------------------- frameless move / resize

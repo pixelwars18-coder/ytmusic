@@ -271,7 +271,7 @@ TrackList::Hit TrackList::hitTest(const QPoint &pt) const {
 
 void TrackList::mouseMoveEvent(QMouseEvent *e) {
     const Hit h = hitTest(e->position().toPoint());
-    if (h.kind != hover.kind || h.idx != hover.idx) {
+    if (h.kind != hover.kind || h.idx != hover.idx || h.sub != hover.sub) {
         if (h.idx != hover.idx) { if (h.kind == None) dwell.stop(); else dwell.start(); }
         hover = h;
         viewport()->setCursor(h.kind == None ? Qt::ArrowCursor : Qt::PointingHandCursor);
@@ -591,16 +591,18 @@ void TrackList::rebuildFeed() {
     feedItems.clear();
     constexpr int gap = 14;
     const int vw = qMax(240, viewport()->width() - 8);   // keep clear of the scroll bar
-    const int cols = qMax(2, (vw + gap) / (176 + gap));
+    const int cols = qMax(2, (vw + gap) / (172 + gap));
     const int cardW = (vw - (cols - 1) * gap) / cols;
-    feedThumbH = cardW * 9 / 16;
-    const int cardH = feedThumbH + 54;
+    feedThumbH = cardW;   // square album art, like YT Music
+    const int cardH = feedThumbH + 56;
     int y = 0;
-    feedItems.append({0, -1, -1, y, 30, 0, vw});
+    feedItems.append({3, -1, -1, y, 52, 0, vw});   // mood chips
+    y += 52;
+    feedItems.append({0, -1, -1, y, 26, 0, vw});
     y += 30;
     for (int s = 0; s < feedSecs.size(); ++s) {
-        feedItems.append({1, s, -1, y, 60, 0, vw});
-        y += 60;
+        feedItems.append({1, s, -1, y, 66, 0, vw});
+        y += 66;
         const int rows = feedSecs[s].id == QLatin1String("recent") ? 1 : 2;
         const int n = qMin(cols * rows, int(feedSecs[s].tracks.size()));
         for (int t = 0; t < n; ++t)
@@ -608,6 +610,26 @@ void TrackList::rebuildFeed() {
         y += ((n + cols - 1) / cols) * (cardH + gap) + 6;
     }
     feedHeight = y + 8;
+}
+
+const QStringList &TrackList::moods() {
+    static const QStringList m{QStringLiteral("Energize"), QStringLiteral("Relax"), QStringLiteral("Workout"), QStringLiteral("Focus"),
+                               QStringLiteral("Commute"), QStringLiteral("Party"), QStringLiteral("Feel good"), QStringLiteral("Sad"),
+                               QStringLiteral("Romance")};
+    return m;
+}
+
+QVector<QRectF> TrackList::moodRects(qreal width) const {
+    QVector<QRectF> v;
+    const QFontMetrics fm(fnt(13, QFont::Medium));
+    qreal x = 0;
+    for (const QString &m : moods()) {
+        const qreal w = fm.horizontalAdvance(m) + 30;
+        if (x + w > width) break;   // whatever fits on one row
+        v.append(QRectF(x, 0, w, 34));
+        x += w + 10;
+    }
+    return v;
 }
 
 TrackList::Hit TrackList::hitFeed(const QPoint &pt) const {
@@ -618,6 +640,12 @@ TrackList::Hit TrackList::hitFeed(const QPoint &pt) const {
         if (y > viewport()->height()) break;
         if (y + it.h < 0 || pt.y() < y || pt.y() >= y + it.h) continue;
         if (it.kind == 0) return {};
+        if (it.kind == 3) {
+            const QVector<QRectF> rs = moodRects(it.w);
+            for (int k = 0; k < rs.size(); ++k)
+                if (rs[k].translated(0, y + 6).contains(pt)) return {Chip, i, k};
+            return {};
+        }
         if (it.kind == 1) {
             if (feedSecs[it.section].tracks.isEmpty()) return {};
             const qreal right = it.x + it.w;
@@ -637,6 +665,10 @@ TrackList::Hit TrackList::hitFeed(const QPoint &pt) const {
 void TrackList::pressFeed(const Hit &h) {
     if (h.idx < 0 || h.idx >= feedItems.size()) return;
     const FeedItem &it = feedItems[h.idx];
+    if (h.kind == Chip && it.kind == 3) {
+        if (h.sub >= 0 && h.sub < moods().size()) emit searchRequested(moods()[h.sub] + QStringLiteral(" music mix"));
+        return;
+    }
     if (it.section < 0 || it.section >= feedSecs.size()) return;
     switch (h.kind) {
     case HeaderPlay: core->playTracks(feedSecs[it.section].tracks, 0, false); return;
@@ -658,8 +690,8 @@ void TrackList::paintFeed(QPainter &p) {
     const int vh = viewport()->height();
     const int scroll = verticalScrollBar()->value();
     const QString nowVid = core->nowVid();
-    const QFont fTitle = fnt(13, QFont::Medium), fArtist = fnt(12), fHead = fnt(18, QFont::Bold), fSmall = fnt(11, QFont::Medium);
-    const QFontMetrics fmTitle(fTitle), fmHead(fHead), fmSmall(fSmall);
+    const QFont fTitle = fnt(13, QFont::Medium), fArtist = fnt(12);
+    const QFontMetrics fmTitle(fTitle);
     for (int i = 0; i < feedItems.size(); ++i) {
         const FeedItem &it = feedItems[i];
         const qreal y = it.y - scroll;
@@ -667,6 +699,22 @@ void TrackList::paintFeed(QPainter &p) {
         if (y + it.h < 0) continue;
         auto hv = [&](Kind k) { return hover.kind == k && hover.idx == i; };
 
+        if (it.kind == 3) { // mood chips (YT Music)
+            const QVector<QRectF> rs = moodRects(it.w);
+            p.setFont(fnt(13, QFont::Medium));
+            for (int k = 0; k < rs.size(); ++k) {
+                const QRectF r = rs[k].translated(0, y + 6);
+                const bool h = hover.kind == Chip && hover.idx == i && hover.sub == k;
+                QColor fill = c.onSurface;
+                fill.setAlphaF(h ? 0.20 : 0.10);
+                p.setPen(Qt::NoPen);
+                p.setBrush(fill);
+                p.drawRoundedRect(r, 11, 11);
+                p.setPen(c.onSurface);
+                p.drawText(r, Qt::AlignCenter, moods()[k]);
+            }
+            continue;
+        }
         if (it.kind == 0) { // status line under the page title
             p.setFont(fnt(13));
             p.setPen(core->feedBuilding ? c.tertiary : c.onSurfaceVariant);
@@ -679,18 +727,21 @@ void TrackList::paintFeed(QPainter &p) {
         if (it.kind == 1) { // shelf header
             const FeedSection &fs = feedSecs[it.section];
             const int tw = it.w - 104;
-            p.setFont(fHead);
-            p.setPen(c.onSurface);
-            p.drawText(QRectF(2, y + 6, tw, 28), Qt::AlignVCenter, fmHead.elidedText(fs.title, Qt::ElideRight, tw));
-            p.setFont(fArtist);
+            QFont fEyebrow = fnt(11, QFont::DemiBold);
+            fEyebrow.setLetterSpacing(QFont::AbsoluteSpacing, 0.8);
+            p.setFont(fEyebrow);
             p.setPen(c.onSurfaceVariant);
-            p.drawText(QRectF(2, y + 32, tw, 20), Qt::AlignVCenter, QFontMetrics(fArtist).elidedText(fs.subtitle, Qt::ElideRight, tw));
+            p.drawText(QRectF(2, y + 8, tw, 16), Qt::AlignVCenter, QFontMetrics(fEyebrow).elidedText(fs.subtitle.toUpper(), Qt::ElideRight, tw));
+            const QFont fBig = fnt(24, QFont::Bold);
+            p.setFont(fBig);
+            p.setPen(c.onSurface);
+            p.drawText(QRectF(2, y + 24, tw, 34), Qt::AlignVCenter, QFontMetrics(fBig).elidedText(fs.title, Qt::ElideRight, tw));
             const qreal right = it.x + it.w;
             const QRectF bs(right - 40, y + 12, 40, 40), bp(right - 88, y + 12, 40, 40);
             p.setPen(Qt::NoPen);
-            p.setBrush(hv(HeaderPlay) ? c.outline : c.surfaceVariant);
+            p.setBrush(hv(HeaderPlay) ? c.primary.lighter(112) : c.primary);
             p.drawEllipse(bp);
-            Icons::paint(p, QRectF(bp.center().x() - 9, bp.center().y() - 9, 18, 18), QStringLiteral("play"), c.onSurface);
+            Icons::paint(p, QRectF(bp.center().x() - 9, bp.center().y() - 9, 18, 18), QStringLiteral("play"), c.onPrimary);
             p.setPen(Qt::NoPen);
             p.setBrush(hv(HeaderShuffle) ? c.outline : c.surfaceVariant);
             p.drawEllipse(bs);
@@ -704,27 +755,17 @@ void TrackList::paintFeed(QPainter &p) {
         const bool active = t.vid == nowVid;
         const bool cardHover = hover.idx == i && hover.kind != None;
         const QRectF th(it.x, y, it.w, feedThumbH);
-        drawThumb(p, th, t.vid, 14);
+        drawThumb(p, th, t.vid, 12);
         if (!active && !cardHover) {
             drawDlBadge(p, th, t.vid);
-            if (t.duration > 0) {   // length, bottom-left of the artwork
-                const QString d = fmtTime(t.duration);
-                const QRectF dr(th.left() + 6, th.bottom() - 24, fmSmall.horizontalAdvance(d) + 12, 18);
-                p.setPen(Qt::NoPen);
-                p.setBrush(QColor(7, 7, 34, 200));
-                p.drawRoundedRect(dr, 9, 9);
-                p.setFont(fSmall);
-                p.setPen(c.onSurface);
-                p.drawText(dr, Qt::AlignCenter, d);
-            }
         }
         if (active || cardHover) {
             p.setPen(Qt::NoPen);
-            p.setBrush(QColor(8, 8, 32, cardHover ? 120 : 160));
-            p.drawRoundedRect(th, 14, 14);
+            p.setBrush(QColor(0, 0, 0, cardHover ? 90 : 150));
+            p.drawRoundedRect(th, 12, 12);
         }
         if (cardHover) {
-            const QRectF pc(th.center().x() - 22, th.center().y() - 22, 44, 44);
+            const QRectF pc(th.right() - 14 - 44, th.bottom() - 14 - 44, 44, 44);
             p.setPen(Qt::NoPen);
             p.setBrush(c.primary);
             p.drawEllipse(pc);

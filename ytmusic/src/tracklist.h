@@ -37,7 +37,7 @@ protected:
     void wheelEvent(QWheelEvent *) override;
 private:
     enum Kind { None, Row, Like, AddPl, Act1, Act2, LoadMore, Chip, ClearHist, HeaderPlay, HeaderShuffle, HeroRefresh };
-    struct Hit { Kind kind = None; int idx = -1; };
+    struct Hit { Kind kind = None; int idx = -1; int sub = -1; };
     static constexpr int kRowH = 68, kRowInner = 64;
 
     struct ChipItem { QRectF r; QString text; };
@@ -58,6 +58,8 @@ private:
     int feedThumbH = 90;     // artwork height of a card at the current width
     bool feedMode() const { return tab == Tab::Home; }
     void rebuildFeed();
+    static const QStringList &moods();
+    QVector<QRectF> moodRects(qreal width) const;
     Hit hitFeed(const QPoint &vp) const;
     void paintFeed(QPainter &p);
     void pressFeed(const Hit &h);
