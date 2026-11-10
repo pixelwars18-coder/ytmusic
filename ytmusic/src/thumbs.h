@@ -1,5 +1,7 @@
 #pragma once
 #include <QCache>
+#include <QColor>
+#include <QHash>
 #include <QImage>
 #include <QObject>
 #include <QPixmap>
@@ -21,6 +23,8 @@ public:
     QPixmap get(const QString &vid, QSize logical, qreal dpr, qreal radius = 0);
     // Same for an arbitrary image URL (playlist covers, large artwork); `key` identifies it in the caches.
     QPixmap getUrl(const QString &key, const QString &url, QSize logical, qreal dpr, qreal radius = 0);
+    // Dominant, saturated colour of a cached thumbnail (invalid until the image is on disk).
+    QColor accent(const QString &vid);
     void clearMemory();
 signals:
     void ready(const QString &key);
@@ -32,6 +36,7 @@ private:
     void decoded(const QString &cacheKey, const QString &key, const QImage &img, qreal dpr);
     QCache<QString, QPixmap> scaled{8 * 1024}; // KB
     QSet<QString> pending, failed, retried;
+    QHash<QString, QColor> accents;
     QSet<QString> onDisk;                    // keys known to be in the disk cache (saves a stat per paint)
     QSet<QString> decoding;                  // cache keys being decoded right now
     QQueue<QPair<QString, QString>> waiting; // key, url

@@ -47,7 +47,7 @@ PlayerBar::Layout PlayerBar::layout() const {
     // YT Music style: the seek line runs along the top edge, "0:00 / 4:23" sits beside the controls
     l.timeL = QRectF(l.repeat.right() + 10, cy - 9, 84, 18);
     l.timeR = QRectF();
-    l.seek = QRectF(pad + 2, 0, W - 2 * pad - 4, 12);
+    l.seek = QRectF(0, 0, W, 12);
     return l;
 }
 
@@ -129,9 +129,13 @@ void PlayerBar::paintEvent(QPaintEvent *) {
     const Palette &c = P();
     const Layout l = layout();
 
-    p.setBrush(c.surfaceVariant);
-    p.setPen(QPen(c.outline, 1));
-    p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 20, 20);
+    {   // docked, flat black glass: rounded only where it meets the window corners
+        QColor bgc = Qt::black;
+        bgc.setAlphaF(0.55);
+        p.setPen(Qt::NoPen);
+        p.setBrush(bgc);
+        p.drawRoundedRect(QRectF(0, -40, width(), height() + 40), 24, 24);
+    }
 
     // now playing
     const Track *t = core->nowPlaying();
@@ -182,7 +186,7 @@ void PlayerBar::paintEvent(QPaintEvent *) {
         if (active) p.drawEllipse(QPointF(track.left() + track.width() * frac, track.center().y()), 6, 6);
     };
     const bool seekActive = hover == SeekBar || dragging == SeekBar;
-    slider(QRectF(l.seek.left(), 5, l.seek.width(), 2), core->duration > 0 ? core->position / core->duration : 0,
+    slider(QRectF(l.seek.left(), seekActive ? 3 : 2, l.seek.width(), 0), core->duration > 0 ? core->position / core->duration : 0,
            c.primary, seekActive, seekActive ? 5 : 3);
 
     // now-playing screen, queue

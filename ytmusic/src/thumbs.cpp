@@ -193,3 +193,27 @@ void Thumbs::pump() {
         p->start(QStringLiteral("curl"), args);
     }
 }
+
+QColor Thumbs::accent(const QString &vid) {
+    if (vid.isEmpty()) return QColor();
+    const auto it = accents.constFind(vid);
+    if (it != accents.constEnd()) return *it;
+    const QString file = pathFor(vid);
+    if (!QFile::exists(file)) return QColor();
+    QImage img(file);
+    if (img.isNull()) return QColor();
+    img = img.scaled(24, 24, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).convertToFormat(QImage::Format_RGB32);
+    qreal r = 0, g = 0, b = 0, wsum = 0;
+    for (int y = 0; y < img.height(); ++y)
+        for (int x = 0; x < img.width(); ++x) {
+            const QColor c = img.pixelColor(x, y);
+            const qreal w = 0.05 + c.hsvSaturationF() * c.valueF();   // vivid pixels count most
+            r += c.redF() * w; g += c.greenF() * w; b += c.blueF() * w; wsum += w;
+        }
+    QColor out = QColor::fromRgbF(r / wsum, g / wsum, b / wsum);
+    float h, s, v, a;
+    out.getHsvF(&h, &s, &v, &a);
+    out = QColor::fromHsvF(h < 0 ? 0 : h, qMin<float>(1.0f, qMax(s, 0.45f)), qBound(0.45f, v, 0.85f));   // keep it colourful but not blinding
+    accents.insert(vid, out);
+    return out;
+}

@@ -5,6 +5,7 @@
 #include "paths.h"
 #include "ui_common.h"
 #include "settings.h"
+#include "thumbs.h"
 #include <QDesktopServices>
 #include <QUrl>
 #include <QCloseEvent>
@@ -115,8 +116,10 @@ void SearchBox::paintEvent(QPaintEvent *) {
     p.setRenderHint(QPainter::Antialiasing);
     const Palette &c = P();
     const bool focus = edit->hasFocus();
-    p.setBrush(c.surfaceVariant);
-    p.setPen(QPen(focus ? c.primary : c.outline, focus ? 2 : 1));
+    QColor fill = Qt::white;
+    fill.setAlphaF(focus ? 0.13 : 0.08);
+    p.setBrush(fill);
+    p.setPen(focus ? QPen(c.primary, 2) : Qt::NoPen);
     p.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), 25, 25);
     Icons::paint(p, QRectF(18, 15, 20, 20), QStringLiteral("search"), c.onSurfaceVariant);
     if (!edit->text().isEmpty()) drawIconButton(p, clearRect(), QStringLiteral("x"), hover == 1);
@@ -221,8 +224,8 @@ void SideBar::paintEvent(QPaintEvent *) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
     const Palette &c = P();
-    QColor panel = c.surfaceVariant;
-    panel.setAlphaF(0.62);
+    QColor panel = Qt::black;
+    panel.setAlphaF(0.28);
     p.setPen(Qt::NoPen);
     p.setBrush(panel);
     p.drawRoundedRect(QRectF(rect()), 22, 22);
@@ -577,8 +580,10 @@ MainWindow::MainWindow(Core *c, Mpris *mpris) : core(c) {
         tabs->update();
         tracks->refresh();
         bar->update();
+        update();   // window glow follows the artwork
         refreshTray();
     };
+    connect(&Thumbs::I(), &Thumbs::ready, this, [this](const QString &k) { if (k == core->nowVid()) update(); });
     connect(core, &Core::trackChanged, this, repaintAll);
     connect(core, &Core::playbackChanged, this, repaintAll);
     connect(core, &Core::listsChanged, this, repaintAll);
@@ -667,11 +672,11 @@ QPixmap MainWindow::snapshot() {
 
 void MainWindow::resizeEvent(QResizeEvent *) {
     // sidebar | search, page header, list        player bar across the bottom
-    const int m = 16, gap = 14, barH = 92;
+    const int m = 16, gap = 10, barH = 90;
     side->setCompact(width() < 920);
     const int sw = side->isCompact() ? 60 : 214;
-    const int barY = height() - m - barH;
-    bar->setGeometry(m, barY, width() - 2 * m, barH);
+    const int barY = height() - barH;   // docked: the bar runs edge to edge along the bottom
+    bar->setGeometry(0, barY, width(), barH);
     side->setGeometry(m, m, sw, barY - gap - m);
     const int cx = m + sw + gap, cw = width() - cx - m;
     search->setGeometry(cx, m, cw, 50);
@@ -691,18 +696,24 @@ void MainWindow::paintEvent(QPaintEvent *) {
         return QColor::fromRgbF(a.redF() * (1 - t) + b.redF() * t, a.greenF() * (1 - t) + b.greenF() * t,
                                 a.blueF() * (1 - t) + b.blueF() * t, a.alphaF());
     };
-    QColor bg = mix(c.surface, Qt::black, 0.42);
-    bg.setAlphaF(0.96);
+    QColor bg = mix(c.surface, Qt::black, 0.80);   // almost black, only a hint of the Noctalia hue
+    bg.setAlphaF(0.97);
     const QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
     p.setBrush(bg);
     p.setPen(Qt::NoPen);
     p.drawRoundedRect(r, 24, 24);
-    QLinearGradient glow(0, 0, 0, qMin<qreal>(height() * 0.75, 460));
-    QColor g0 = mix(c.secondary, c.primary, 0.25);
-    g0.setAlphaF(0.34);
+    // the glow takes the colour of whatever is playing (falls back to the Noctalia accent)
+    QColor art = Thumbs::I().accent(core->nowVid());
+    if (!art.isValid()) art = mix(c.secondary, c.primary, 0.25);
+    QLinearGradient glow(0, 0, 0, height() * 0.92);
+    QColor g0 = mix(art, c.secondary, 0.15);
+    g0.setAlphaF(0.62);
     QColor g1 = g0;
     g1.setAlphaF(0.0);
+    QColor gm = g0;
+    gm.setAlphaF(0.20);
     glow.setColorAt(0, g0);
+    glow.setColorAt(0.45, gm);
     glow.setColorAt(1, g1);
     p.setBrush(glow);
     p.drawRoundedRect(r, 24, 24);

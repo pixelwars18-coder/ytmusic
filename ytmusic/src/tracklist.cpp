@@ -598,6 +598,11 @@ void TrackList::rebuildFeed() {
     int y = 0;
     feedItems.append({3, -1, -1, y, 52, 0, vw});   // mood chips
     y += 52;
+    if (!feedSecs.isEmpty() && !feedSecs[0].tracks.isEmpty()) {   // big "listen again" banner
+        const int hh = qBound(190, vw * 11 / 40, 250);
+        feedItems.append({4, 0, 0, y, hh, 0, vw});
+        y += hh + 14;
+    }
     const bool status = core->feedBuilding || core->feed.isEmpty();   // otherwise no status line
     feedItems.append({0, -1, -1, y, status ? 26 : 0, 0, vw});
     y += status ? 30 : 4;
@@ -641,6 +646,7 @@ TrackList::Hit TrackList::hitFeed(const QPoint &pt) const {
         if (y > viewport()->height()) break;
         if (y + it.h < 0 || pt.y() < y || pt.y() >= y + it.h) continue;
         if (it.kind == 0) return {};
+        if (it.kind == 4) return {HeaderPlay, i};
         if (it.kind == 3) {
             const QVector<QRectF> rs = moodRects(it.w);
             for (int k = 0; k < rs.size(); ++k)
@@ -714,6 +720,46 @@ void TrackList::paintFeed(QPainter &p) {
                 p.setPen(c.onSurface);
                 p.drawText(r, Qt::AlignCenter, moods()[k]);
             }
+            continue;
+        }
+        if (it.kind == 4) { // hero banner: the first pick, large, with a play button
+            const Track &t = feedSecs[0].tracks[0];
+            const QRectF hr(it.x, y, it.w, it.h);
+            const int rad = 22;
+            const QPixmap hq = Thumbs::I().getUrl(t.vid + QStringLiteral(":hq"), QStringLiteral("https://i.ytimg.com/vi/%1/hq720.jpg").arg(t.vid),
+                                                  hr.size().toSize(), p.device()->devicePixelRatioF(), rad);
+            if (!hq.isNull()) p.drawPixmap(hr.topLeft(), hq);
+            else drawThumb(p, hr, t.vid, rad);
+            QLinearGradient shade(hr.left(), 0, hr.right(), 0);
+            shade.setColorAt(0, QColor(0, 0, 0, 215));
+            shade.setColorAt(0.55, QColor(0, 0, 0, 120));
+            shade.setColorAt(1, QColor(0, 0, 0, 20));
+            p.setPen(Qt::NoPen);
+            p.setBrush(shade);
+            p.drawRoundedRect(hr, rad, rad);
+            const qreal tw = qMin<qreal>(it.w * 0.62, 520);
+            QFont fe = fnt(11, QFont::Bold);
+            fe.setLetterSpacing(QFont::AbsoluteSpacing, 1.2);
+            p.setFont(fe);
+            p.setPen(c.primary);
+            p.drawText(QRectF(it.x + 28, y + it.h * 0.17, tw, 18), Qt::AlignVCenter, feedSecs[0].title.toUpper());
+            const QFont fb = fnt(30, QFont::Bold);
+            p.setFont(fb);
+            p.setPen(Qt::white);
+            p.drawText(QRectF(it.x + 28, y + it.h * 0.17 + 24, tw, 76), Qt::AlignTop | Qt::TextWordWrap,
+                       QFontMetrics(fb).elidedText(t.title, Qt::ElideRight, int(tw * 2 - 20)));
+            p.setFont(fnt(14));
+            p.setPen(QColor(255, 255, 255, 190));
+            p.drawText(QRectF(it.x + 28, y + it.h - 86, tw, 20), Qt::AlignVCenter, t.artist);
+            const QRectF pb(it.x + 28, y + it.h - 54, 112, 38);
+            const bool ph = hv(HeaderPlay);
+            p.setPen(Qt::NoPen);
+            p.setBrush(ph ? c.primary.lighter(112) : c.primary);
+            p.drawRoundedRect(pb, 19, 19);
+            Icons::paint(p, QRectF(pb.left() + 16, pb.center().y() - 8, 16, 16), QStringLiteral("play"), c.onPrimary);
+            p.setFont(fnt(14, QFont::Bold));
+            p.setPen(c.onPrimary);
+            p.drawText(pb.adjusted(36, 0, 0, 0), Qt::AlignVCenter, QStringLiteral("Play"));
             continue;
         }
         if (it.kind == 0 && it.h == 0) continue;
