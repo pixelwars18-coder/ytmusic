@@ -5,6 +5,7 @@
 #include "paths.h"
 #include "ui_common.h"
 #include "settings.h"
+#include "thumbs.h"
 #include <QDesktopServices>
 #include <QUrl>
 #include <QCloseEvent>
@@ -34,6 +35,7 @@
 #include <QMenu>
 #include <QScrollBar>
 #include <QMouseEvent>
+#include <QWheelEvent>
 #include <QPainter>
 #include <QWindow>
 #include <malloc.h>
@@ -78,15 +80,15 @@ private:
 
 // ------------------------------------------------------------------ SearchBox
 SearchBox::SearchBox(QWidget *parent) : QWidget(parent) {
-    setFixedHeight(50);
+    setFixedHeight(Theme::I().apple() ? 34 : 50);
     setMouseTracking(true);
     edit = new QLineEdit(this);
     edit->setFrame(false);
-    edit->setPlaceholderText(QStringLiteral("Search YouTube or paste a link…   ( / )"));
+    edit->setPlaceholderText(Theme::I().apple() ? QStringLiteral("Search") : QStringLiteral("Search YouTube or paste a link…   ( / )"));
     edit->setContextMenuPolicy(Qt::DefaultContextMenu);
     auto restyle = [this] {
         const Palette &c = P();
-        edit->setFont(fnt(15));
+        edit->setFont(fnt(Theme::I().apple() ? 13 : 15));
         edit->setStyleSheet(QStringLiteral("QLineEdit{background:transparent;border:none;color:%1;"
                                            "selection-background-color:%2;selection-color:%3}")
                                 .arg(c.onSurface.name(), c.primary.name(), c.onPrimary.name()));
@@ -101,10 +103,17 @@ SearchBox::SearchBox(QWidget *parent) : QWidget(parent) {
     connect(edit, &QLineEdit::textChanged, this, qOverload<>(&QWidget::update));
 }
 
-QRectF SearchBox::goRect() const { return QRectF(width() - 6 - 38, 6, 38, 38); }
-QRectF SearchBox::clearRect() const { return QRectF(goRect().left() - 4 - 32, 9, 32, 32); }
+QRectF SearchBox::goRect() const { return Theme::I().apple() ? QRectF() : QRectF(width() - 6 - 38, 6, 38, 38); }
+QRectF SearchBox::clearRect() const {
+    return Theme::I().apple() ? QRectF(width() - 6 - 22, 6, 22, 22) : QRectF(goRect().left() - 4 - 32, 9, 32, 32);
+}
 
 void SearchBox::resizeEvent(QResizeEvent *) {
+    if (Theme::I().apple()) {
+        const int right = edit->text().isEmpty() ? width() - 8 : int(clearRect().left()) - 2;
+        edit->setGeometry(32, 3, right - 32, 28);
+        return;
+    }
     const int right = edit->text().isEmpty() ? int(goRect().left()) - 8 : int(clearRect().left()) - 4;
     edit->setGeometry(18 + 20 + 10, 8, right - 48, 34);
 }
@@ -114,8 +123,18 @@ void SearchBox::paintEvent(QPaintEvent *) {
     p.setRenderHint(QPainter::Antialiasing);
     const Palette &c = P();
     const bool focus = edit->hasFocus();
-    p.setBrush(c.surfaceVariant);
-    p.setPen(QPen(focus ? c.primary : c.outline, focus ? 2 : 1));
+    QColor fill = Qt::white;
+    fill.setAlphaF(focus ? 0.13 : 0.08);
+    p.setBrush(fill);
+    p.setPen(focus ? QPen(c.primary, 2) : Qt::NoPen);
+    if (Theme::I().apple()) {
+        p.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), 8, 8);
+        Icons::paint(p, QRectF(10, 9, 16, 16), QStringLiteral("search"), c.onSurfaceVariant);
+        if (!edit->text().isEmpty()) drawIconButton(p, clearRect(), QStringLiteral("x"), hover == 1);
+        const int right = edit->text().isEmpty() ? width() - 8 : int(clearRect().left()) - 2;
+        if (edit->width() != right - 32) edit->setGeometry(32, 3, right - 32, 28);
+        return;
+    }
     p.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), 25, 25);
     Icons::paint(p, QRectF(18, 15, 20, 20), QStringLiteral("search"), c.onSurfaceVariant);
     if (!edit->text().isEmpty()) drawIconButton(p, clearRect(), QStringLiteral("x"), hover == 1);
@@ -146,9 +165,225 @@ void SearchBox::mousePressEvent(QMouseEvent *e) {
     }
 }
 
+// -------------------------------------------------------------------- SideBar
+namespace {
+inline bool apl() { return Theme::I().apple(); }
+}
+#define kNavTop (apl() ? 58 : 62)
+#define kNavH (apl() ? 32 : 40)
+#define kNavGap (apl() ? 2 : 4)
+#define kPlRow (apl() ? 30 : 34)
+
+SideBar::SideBar(Core *c, QWidget *parent) : QWidget(parent), core(c) {
+    setMouseTracking(true);
+    setFocusPolicy(Qt::NoFocus);
+}
+
+void SideBar::setTab(Tab t) {
+    tab = t;
+    update();
+}
+
+void SideBar::setCompact(bool on) {
+    if (compact == on) return;
+    compact = on;
+    plScroll = 0;
+    hover = -1;
+    update();
+}
+
+// The scrolling list of playlists: between the "Playlists" caption and the two bottom actions.
+QRectF SideBar::playlistArea() const {
+    const qreal top = kNavTop + 5 * (kNavH + kNavGap) + 14 + 28;
+    const qreal bottom = height() - 8 - 2 * (kNavH + kNavGap) - 6;
+    return QRectF(8, top, width() - 16, qMax<qreal>(0, bottom - top));
+}
+
+int SideBar::playlistContentH() const { return int(core->playlists.size()) * kPlRow; }
+
+QVector<SideBar::Item> SideBar::items() const {
+    QVector<Item> v;
+    const qreal x = 8, w = width() - 16;
+    qreal y = kNavTop;
+    const bool plOpen = tab == Tab::Saved && !core->savedOpenId.isEmpty();
+    auto nav = [&](Tab t, const QString &label, const QString &icon, int count) {
+        // an opened playlist is highlighted in the list below instead (unless that list is hidden)
+        const bool active = tab == t && !nowPlayingOpen && !(t == Tab::Saved && plOpen && !compact);
+        v.append({QRectF(x, y, w, kNavH), Nav, int(t), label, icon, QString(), count > 0 ? QString::number(count) : QString(), active});
+        y += kNavH + kNavGap;
+    };
+    nav(Tab::Home, Theme::I().apple() ? QStringLiteral("Listen Now") : QStringLiteral("For you"), QStringLiteral("home"), 0);
+    nav(Tab::Results, QStringLiteral("Search"), QStringLiteral("search"), 0);
+    nav(Tab::Queue, QStringLiteral("Queue"), QStringLiteral("list"), int(core->queue.size()));
+    nav(Tab::Liked, QStringLiteral("Liked songs"), QStringLiteral("heart"), int(core->liked.size()));
+    nav(Tab::Saved, QStringLiteral("Playlists"), QStringLiteral("bookmark"), int(core->playlists.size()));
+
+    if (!compact) {
+        y += 14;
+        v.append({QRectF(x + 12, y, w - 12 - 32, 22), Caption, 0, QStringLiteral("YOUR PLAYLISTS"), QString(), QString(), QString(), false});
+        v.append({QRectF(x + w - 28, y - 3, 28, 28), NewPlaylist, 17, QStringLiteral("New playlist"), QStringLiteral("plus"), QString(), QString(), false});
+        const QRectF area = playlistArea();
+        qreal py = area.top() - plScroll;
+        for (const SavedPlaylist &p : std::as_const(core->playlists)) {
+            const QRectF r(area.left(), py, area.width(), kPlRow - 2);
+            py += kPlRow;
+            if (r.bottom() <= area.top() || r.top() >= area.bottom()) continue;
+            v.append({r, Playlist, 0, p.name, QString(), p.id, QString::number(p.tracks.size()), plOpen && core->savedOpenId == p.id});
+        }
+    }
+
+    qreal by = height() - 8 - 2 * kNavH - kNavGap;
+    v.append({QRectF(x, by, w, kNavH), Action, 7, QStringLiteral("Now playing"), QStringLiteral("lyrics"), QString(), QString(), nowPlayingOpen});
+    by += kNavH + kNavGap;
+    v.append({QRectF(x, by, w, kNavH), Action, 8, QStringLiteral("Settings"), QStringLiteral("gear"), QString(), QString(), false});
+    return v;
+}
+
+void SideBar::paintEvent(QPaintEvent *) {
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing);
+    const Palette &c = P();
+    if (Theme::I().apple()) {   // flat sidebar, search field sits at its top (a separate widget), no brand mark
+        p.setBrush(QColor("#262628"));
+        p.drawRect(rect());
+        p.setPen(QColor(255, 255, 255, 20));
+        p.drawLine(width() - 1, 0, width() - 1, height());
+    } else {
+    QColor panel = Qt::black;
+    panel.setAlphaF(0.28);
+    p.setBrush(panel);
+    p.drawRoundedRect(QRectF(rect()), 22, 22);
+
+    // brand
+    const QRectF logo(compact ? (width() - 34) / 2.0 : 16, 14, 34, 34);
+    p.setBrush(c.primary);
+    p.drawRoundedRect(logo, 11, 11);
+    Icons::paint(p, logo.adjusted(8, 8, -8, -8), QStringLiteral("music"), c.onPrimary);
+    if (!compact) {
+        p.setPen(c.onSurface);
+        p.setFont(fnt(16, QFont::Bold));
+        p.drawText(QRectF(logo.right() + 10, logo.top(), width() - logo.right() - 18, logo.height()), Qt::AlignVCenter, QStringLiteral("YT Music"));
+    }
+    }
+
+    const auto its = items();
+    const QRectF area = playlistArea();
+    const QFont fLabel = fnt(13, QFont::Medium), fActive = fnt(13, QFont::DemiBold), fBadge = fnt(11, QFont::Medium);
+    for (int i = 0; i < its.size(); ++i) {
+        const Item &it = its[i];
+        const bool hov = hover == i;
+        if (it.kind == Caption) {
+            QFont f = fnt(10, QFont::Bold);
+            f.setLetterSpacing(QFont::AbsoluteSpacing, 1.1);
+            p.setFont(f);
+            p.setPen(c.onSurfaceVariant);
+            p.drawText(it.r, Qt::AlignVCenter | Qt::AlignLeft, it.label);
+            continue;
+        }
+        if (it.kind == NewPlaylist) {
+            drawIconButton(p, it.r, it.icon, hov);
+            continue;
+        }
+        p.save();
+        if (it.kind == Playlist) p.setClipRect(area);
+        p.setPen(Qt::NoPen);
+        if (Theme::I().apple()) {
+            if (it.active || hov) {
+                p.setBrush(QColor(255, 255, 255, it.active ? 36 : 16));
+                p.drawRoundedRect(it.r, 6, 6);
+            }
+        } else if (it.active) {
+            QColor a = c.primary;
+            a.setAlphaF(0.15);
+            p.setBrush(a);
+            p.drawRoundedRect(it.r, 12, 12);
+        } else if (hov) {
+            p.setBrush(c.outline);
+            p.drawRoundedRect(it.r, 12, 12);
+        }
+        const QColor fg = (it.active && !Theme::I().apple()) ? c.primary : c.onSurface;
+        const QColor iconFg = Theme::I().apple() ? c.primary : fg;   // Apple Music tints sidebar icons with the accent
+        const qreal cy = it.r.center().y();
+        if (it.kind == Playlist) {
+            const qreal bw = QFontMetrics(fBadge).horizontalAdvance(it.badge) + 6;
+            const QRectF tr(it.r.left() + 12, it.r.top(), it.r.width() - 24 - bw, it.r.height());
+            p.setFont(it.active ? fActive : fnt(13));
+            p.setPen(Theme::I().apple() ? c.onSurface : (it.active ? c.primary : (hov ? c.onSurface : c.onSurfaceVariant)));
+            p.drawText(tr, Qt::AlignVCenter | Qt::AlignLeft, QFontMetrics(p.font()).elidedText(it.label, Qt::ElideRight, int(tr.width())));
+            p.setFont(fBadge);
+            p.setPen(c.onSurfaceVariant);
+            p.drawText(QRectF(it.r.right() - 10 - bw, it.r.top(), bw, it.r.height()), Qt::AlignVCenter | Qt::AlignRight, it.badge);
+        } else {
+            const QRectF ir = compact ? QRectF(it.r.center().x() - 10, cy - 10, 20, 20) : QRectF(it.r.left() + 13, cy - 10, 20, 20);
+            Icons::paint(p, ir, it.icon, iconFg, it.active && it.icon == QLatin1String("heart"));
+            if (!compact) {
+                p.setFont(it.active ? fActive : fLabel);
+                p.setPen(fg);
+                p.drawText(QRectF(it.r.left() + 45, it.r.top(), it.r.width() - 45 - 40, it.r.height()), Qt::AlignVCenter | Qt::AlignLeft, it.label);
+                if (!it.badge.isEmpty()) {
+                    p.setFont(fBadge);
+                    p.setPen((it.active && !Theme::I().apple()) ? c.primary : c.onSurfaceVariant);
+                    p.drawText(QRectF(it.r.right() - 46, it.r.top(), 34, it.r.height()), Qt::AlignVCenter | Qt::AlignRight, it.badge);
+                }
+            }
+        }
+        p.restore();
+    }
+}
+
+void SideBar::mouseMoveEvent(QMouseEvent *e) {
+    const auto its = items();
+    const QRectF area = playlistArea();
+    int h = -1;
+    for (int i = 0; i < its.size(); ++i) {
+        if (its[i].kind == Caption || !its[i].r.contains(e->position())) continue;
+        if (its[i].kind == Playlist && !area.contains(e->position())) continue;
+        h = i;
+    }
+    if (h != hover) {
+        hover = h;
+        setCursor(h >= 0 ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        setToolTip(h >= 0 && (compact || its[h].kind == NewPlaylist) ? its[h].label : QString());
+        update();
+    }
+}
+
+void SideBar::leaveEvent(QEvent *) {
+    hover = -1;
+    update();
+}
+
+void SideBar::wheelEvent(QWheelEvent *e) {
+    if (compact) return;
+    const int maxScroll = qMax(0, playlistContentH() - int(playlistArea().height()));
+    const int next = qBound(0, plScroll - e->angleDelta().y() / 2, maxScroll);
+    if (next != plScroll) {
+        plScroll = next;
+        hover = -1;
+        update();
+    }
+    e->accept();
+}
+
+void SideBar::mousePressEvent(QMouseEvent *e) {
+    if (e->button() != Qt::LeftButton) return;
+    const QRectF area = playlistArea();
+    for (const Item &it : items()) {
+        if (it.kind == Caption || !it.r.contains(e->position())) continue;
+        if (it.kind == Playlist && !area.contains(e->position())) continue;
+        switch (it.kind) {
+        case Nav: emit tabChanged(Tab(it.id)); break;
+        case Playlist: emit playlistRequested(it.pid); break;
+        default: emit actionTriggered(it.id); break;
+        }
+        return;
+    }
+    emit dragRequested();
+}
+
 // -------------------------------------------------------------------- TabsBar
 TabsBar::TabsBar(Core *c, QWidget *parent) : QWidget(parent), core(c) {
-    setFixedHeight(32);
+    setFixedHeight(40);
     setMouseTracking(true);
 }
 
@@ -159,18 +394,7 @@ void TabsBar::setTab(Tab t) {
 
 QVector<TabsBar::Item> TabsBar::items() const {
     QVector<Item> v;
-    qreal x = 0;
-    auto add = [&](int id, const QString &label, const QString &icon, bool accent) {
-        const int w = pillWidth(label, icon);
-        v.append({QRectF(x, 1, w, 30), id, label, icon, accent});
-        x += w + 8;
-    };
-    add(4, QStringLiteral("For you"), {}, tab == Tab::Home);
-    add(0, QStringLiteral("Results"), {}, tab == Tab::Results);
-    add(1, core->queue.isEmpty() ? QStringLiteral("Queue") : QStringLiteral("Queue  %1").arg(core->queue.size()), {}, tab == Tab::Queue);
-    add(2, core->liked.isEmpty() ? QStringLiteral("Liked") : QStringLiteral("Liked  %1").arg(core->liked.size()), {}, tab == Tab::Liked);
-    add(3, core->playlists.isEmpty() ? QStringLiteral("Saved") : QStringLiteral("Saved  %1").arg(core->playlists.size()), {}, tab == Tab::Saved);
-
+    const qreal py = (height() - 30) / 2.0;
     const bool detail = tab == Tab::Results && core->detailOpen;
     const bool savedOpen = tab == Tab::Saved && !core->savedOpenId.isEmpty();
     const bool hasTracks = !core->list(tab).isEmpty();
@@ -179,8 +403,6 @@ QVector<TabsBar::Item> TabsBar::items() const {
     QVector<Item> r;
     auto addR = [&](int id, const QString &label, const QString &icon) { r.append({QRectF(), id, label, icon, false}); };
     addR(9, QString(), QStringLiteral("x"));
-    addR(8, QString(), QStringLiteral("gear"));
-    addR(7, QString(), QStringLiteral("lyrics"));
     const bool canSel = tab == Tab::Queue || tab == Tab::Liked || tab == Tab::Saved;
     const bool savedList = tab == Tab::Saved && !savedOpen;
     const bool anything = savedList ? !core->playlists.isEmpty() : hasTracks;
@@ -211,43 +433,62 @@ QVector<TabsBar::Item> TabsBar::items() const {
         addR(11, QStringLiteral("Shuffle"), QStringLiteral("shuffle"));
         addR(10, QStringLiteral("Play all"), QStringLiteral("play"));
     }
-    // not enough room beside the tabs: the action pills shrink to icon-only
+
+    // left side: page title, or "back" + the opened playlist's name; Search also gets its Songs / Playlists switch
+    QString title;
+    if (selecting) title = QStringLiteral("%1 selected").arg(selCount);
+    else if (detail) title = core->detail.title;
+    else if (savedOpen) title = core->savedOpen() ? core->savedOpen()->name : QString();
+    else {
+        switch (tab) {
+        case Tab::Home: title = Theme::I().apple() ? QStringLiteral("Listen Now") : QStringLiteral("For you"); break;
+        case Tab::Results: title = QStringLiteral("Search"); break;
+        case Tab::Queue: title = QStringLiteral("Queue"); break;
+        case Tab::Liked: title = QStringLiteral("Liked songs"); break;
+        case Tab::Saved: title = QStringLiteral("Playlists"); break;
+        }
+    }
+    const bool back = !selecting && (detail || savedOpen);
+    const bool modes = !selecting && tab == Tab::Results && !detail;
+    const qreal titleW = QFontMetrics(fnt(Theme::I().apple() ? 26 : 20, QFont::Bold)).horizontalAdvance(title) + 4;
+    const int wSongs = pillWidth(QStringLiteral("Songs"), {}), wPl = pillWidth(QStringLiteral("Playlists"), {});
+    const qreal modesW = modes ? wSongs + 8 + wPl + 14 : 0;
+    const qreal leftNeed = (back ? 38 : 0) + qMin<qreal>(titleW, Theme::I().apple() ? 320 : 200) + modesW;
+
+    // not enough room beside the title: the action pills shrink to icon-only
     qreal need = 0;
-    for (const Item &it : std::as_const(r)) need += (it.id == 9 || it.id == 8 || it.id == 7 ? 30 : pillWidth(it.label, it.icon)) + 8;
-    const bool compact = x + need + 16 > width();
+    for (const Item &it : std::as_const(r)) need += (it.id == 9 ? 30 : pillWidth(it.label, it.icon)) + 8;
+    const bool compact = leftNeed + need + 16 > width();
     qreal rx = width();
     for (Item &it : r) {
-        if (compact && it.id != 9 && it.id != 8 && it.id != 7 && !it.icon.isEmpty()) it.label.clear();
-        if (it.id == 9 || it.id == 8 || it.id == 7 || (compact && it.label.isEmpty() && !it.icon.isEmpty())) {
-            it.r = QRectF(rx - 30, 1, 30, 30);
+        if (compact && it.id != 9 && !it.icon.isEmpty()) it.label.clear();
+        if (it.id == 9 || (compact && it.label.isEmpty() && !it.icon.isEmpty())) {
+            it.r = QRectF(rx - 30, py, 30, 30);
             rx -= 38;
         } else {
             const int w = pillWidth(it.label, it.icon);
-            it.r = QRectF(rx - w, 1, w, 30);
+            it.r = QRectF(rx - w, py, w, 30);
             rx -= w + 8;
         }
         v.append(it);
     }
 
-    // left-of-actions context: search-mode pills, or "back" + playlist title
-    x += 4;
-    if (selecting) {
-        const QString text = QStringLiteral("%1 selected").arg(selCount);
-        const qreal avail = rx - x - 8;
-        if (avail > 40) v.append({QRectF(x, 1, avail, 30), 31, text, QString(), false});
-    } else if (tab == Tab::Results && !detail) {
+    qreal x = 0;
+    if (back) {
+        v.append({QRectF(x, py, 30, 30), 30, QString(), QStringLiteral("back"), false});
+        x += 38;
+    }
+    const qreal avail = rx - x - 8 - modesW;
+    if (avail > 30) {
+        const qreal w = qMin(titleW, avail);
+        v.append({QRectF(x, 0, w, height()), 31, title, QString(), false});
+        x += w + 14;
+    }
+    if (modes) {
         const bool songs = core->searchMode == Core::SearchMode::Songs;
-        add(20, QStringLiteral("Songs"), {}, songs);
-        add(21, QStringLiteral("Playlists"), {}, !songs);
-    } else if (detail || savedOpen) {
-        v.append({QRectF(x, 1, 30, 30), 30, QString(), QStringLiteral("back"), false});
-        x += 36;
-        const QString title = detail ? core->detail.title : (core->savedOpen() ? core->savedOpen()->name : QString());
-        const qreal avail = rx - x - 8;
-        if (avail > 40) {
-            const QFontMetrics fm(fnt(13, QFont::DemiBold));
-            v.append({QRectF(x, 1, avail, 30), 31, fm.elidedText(title, Qt::ElideRight, int(avail)), QString(), false});
-        }
+        v.append({QRectF(x, py, wSongs, 30), 20, QStringLiteral("Songs"), QString(), songs});
+        x += wSongs + 8;
+        v.append({QRectF(x, py, wPl, 30), 21, QStringLiteral("Playlists"), QString(), !songs});
     }
     return v;
 }
@@ -261,9 +502,10 @@ void TabsBar::paintEvent(QPaintEvent *) {
         if (it.id == 9) drawIconButton(p, it.r, QStringLiteral("x"), hover == i);
         else if (it.id == 30) drawIconButton(p, it.r, QStringLiteral("back"), hover == i);
         else if (it.id == 31) {
-            p.setFont(fnt(13, QFont::DemiBold));
+            const QFont f = fnt(Theme::I().apple() ? 26 : 20, QFont::Bold);
+            p.setFont(f);
             p.setPen(P().onSurface);
-            p.drawText(it.r, Qt::AlignVCenter | Qt::AlignLeft, it.label);
+            p.drawText(it.r, Qt::AlignVCenter | Qt::AlignLeft, QFontMetrics(f).elidedText(it.label, Qt::ElideRight, int(it.r.width())));
         } else drawPill(p, it.r, it.label, it.icon, it.accent, hover == i);
     }
 }
@@ -285,16 +527,8 @@ void TabsBar::mousePressEvent(QMouseEvent *e) {
     if (e->button() != Qt::LeftButton) return;
     for (const Item &it : items()) {
         if (it.id == 31 || !it.r.contains(e->position())) continue;
-        switch (it.id) {
-        case 4: emit tabChanged(Tab::Home); break;
-        case 0: emit tabChanged(Tab::Results); break;
-        case 1: emit tabChanged(Tab::Queue); break;
-        case 2: emit tabChanged(Tab::Liked); break;
-        case 3: emit tabChanged(Tab::Saved); break;
-        case 9: emit hideRequested(); break;
-        case 8: emit actionTriggered(8); break;
-        default: emit actionTriggered(it.id); break;
-        }
+        if (it.id == 9) emit hideRequested();
+        else emit actionTriggered(it.id);
         return;
     }
     emit dragRequested();
@@ -309,10 +543,11 @@ MainWindow::MainWindow(Core *c, Mpris *mpris) : core(c) {
     setAttribute(Qt::WA_TranslucentBackground);
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
-    setMinimumSize(760, 520);
-    resize(980, 640);
+    setMinimumSize(780, 540);
+    resize(1100, 700);
 
     search = new SearchBox(this);
+    side = new SideBar(core, this);
     tabs = new TabsBar(core, this);
     tracks = new TrackList(core, this);
     lyricsView = new LyricsView(core, this);
@@ -324,8 +559,31 @@ MainWindow::MainWindow(Core *c, Mpris *mpris) : core(c) {
         search->edit->setText(q);
         doSearch(q);
     });
-    connect(tabs, &TabsBar::tabChanged, this, &MainWindow::setTab);
     connect(tabs, &TabsBar::hideRequested, this, &QWidget::hide);
+    connect(side, &SideBar::tabChanged, this, [this](Tab t) {
+        if (lyricsView->isVisible()) lyricsView->closeView();
+        if (t == Tab::Saved && !core->savedOpenId.isEmpty()) core->closeSaved();   // "Playlists" always shows the list
+        setTab(t);
+        if (t == Tab::Results && !core->hasResults() && !core->detailOpen) {
+            search->edit->setFocus();
+            search->edit->selectAll();
+        }
+    });
+    connect(side, &SideBar::playlistRequested, this, [this](const QString &id) {
+        if (lyricsView->isVisible()) lyricsView->closeView();
+        setTab(Tab::Saved);
+        core->openSaved(id);
+    });
+    connect(side, &SideBar::actionTriggered, this, &MainWindow::onAction);
+    connect(lyricsView, &LyricsView::closed, this, [this] {
+        side->nowPlayingOpen = false;
+        side->update();
+    });
+    connect(bar, &PlayerBar::expandRequested, this, &MainWindow::toggleNowPlaying);
+    connect(bar, &PlayerBar::queueRequested, this, [this] {
+        if (lyricsView->isVisible()) lyricsView->closeView();
+        setTab(Tab::Queue);
+    });
     connect(tabs, &TabsBar::actionTriggered, this, &MainWindow::onAction);
     connect(tracks, &TrackList::addToPlaylistRequested, this, &MainWindow::addToPlaylistMenu);
     connect(tracks, &TrackList::trackMenuRequested, this, &MainWindow::showTrackMenu);
@@ -346,13 +604,18 @@ MainWindow::MainWindow(Core *c, Mpris *mpris) : core(c) {
     applyPalette();
     auto drag = [this] { if (windowHandle()) windowHandle()->startSystemMove(); };
     connect(tabs, &TabsBar::dragRequested, this, drag);
+    connect(side, &SideBar::dragRequested, this, drag);
+    connect(bar, &PlayerBar::dragRequested, this, drag);
 
     auto repaintAll = [this] {
+        side->update();
         tabs->update();
         tracks->refresh();
         bar->update();
+        update();   // window glow follows the artwork
         refreshTray();
     };
+    connect(&Thumbs::I(), &Thumbs::ready, this, [this](const QString &k) { if (k == core->nowVid()) update(); });
     connect(core, &Core::trackChanged, this, repaintAll);
     connect(core, &Core::playbackChanged, this, repaintAll);
     connect(core, &Core::listsChanged, this, repaintAll);
@@ -381,19 +644,28 @@ MainWindow::MainWindow(Core *c, Mpris *mpris) : core(c) {
 
     qApp->installEventFilter(this);
     buildTray();
-    tabs->setTab(Tab::Home);
-    tracks->setTab(Tab::Home);
-    core->refreshFeedIfStale();
+    setTab(Tab::Home);
+    // Building the feed starts several yt-dlp processes: let the window appear first.
+    QTimer::singleShot(700, core, &Core::refreshFeedIfStale);
     setFocus();
 }
 
 void MainWindow::setTab(Tab t) {
+    side->setTab(t);
     tabs->setTab(t);
     tracks->setTab(t);
 }
 
+// The now-playing screen (artwork, what's next, lyrics) covers the page area.
+void MainWindow::toggleNowPlaying() {
+    lyricsView->toggle();
+    side->nowPlayingOpen = lyricsView->isVisible();
+    side->update();
+}
+
 void MainWindow::doSearch(const QString &q) {
     if (q.trimmed().isEmpty()) return;
+    if (lyricsView->isVisible()) lyricsView->closeView();
     setTab(Tab::Results);
     core->search(q, false);
     setFocus();
@@ -431,25 +703,78 @@ QPixmap MainWindow::snapshot() {
 }
 
 void MainWindow::resizeEvent(QResizeEvent *) {
-    const int m = 20, w = width() - 2 * m;
-    search->setGeometry(m, m, w, 50);
-    tabs->setGeometry(m, m + 50 + 14, w, 32);
-    const int top = m + 50 + 14 + 32 + 14;
-    const int barY = height() - m - 92;
-    bar->setGeometry(m, barY, w, 92);
-    tracks->setGeometry(m, top, w, barY - 16 - top);
-    lyricsView->setGeometry(tracks->geometry());
+    if (Theme::I().apple()) {   // toolbar (transport + now-playing display) across the top, sidebar | content below
+        const int tb = 62;
+        side->setCompact(width() < 920);
+        const int sw = side->isCompact() ? 60 : 224;
+        bar->setGeometry(0, 0, width(), tb);
+        side->setGeometry(0, tb, sw, height() - tb);
+        const int cx = sw + 16, cw = width() - cx - 16;
+        if (side->isCompact()) search->setGeometry(cx, tb + 10, cw, 34);
+        else search->setGeometry(10, tb + 12, sw - 20, 34);
+        search->raise();
+        const int ty = tb + 10 + (side->isCompact() ? 40 : 0);
+        tabs->setGeometry(cx, ty, cw, 52);
+        const int top = ty + 52 + 4;
+        tracks->setGeometry(cx - 4, top, cw + 8, height() - top - 6);
+        lyricsView->setGeometry(sw + 10, tb + 10, width() - sw - 20, height() - tb - 18);
+        return;
+    }
+    // sidebar | search, page header, list        player bar across the bottom
+    const int m = 16, gap = 10, barH = 90;
+    side->setCompact(width() < 920);
+    const int sw = side->isCompact() ? 60 : 214;
+    const int barY = height() - barH;   // docked: the bar runs edge to edge along the bottom
+    bar->setGeometry(0, barY, width(), barH);
+    side->setGeometry(m, m, sw, barY - gap - m);
+    const int cx = m + sw + gap, cw = width() - cx - m;
+    search->setGeometry(cx, m, cw, 50);
+    tabs->setGeometry(cx, m + 50 + 12, cw, 40);
+    const int top = m + 50 + 12 + 40 + 10;
+    tracks->setGeometry(cx, top, cw, barY - gap - top);
+    lyricsView->setGeometry(cx, m, cw, barY - gap - m);
 }
 
 void MainWindow::paintEvent(QPaintEvent *) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
     const Palette &c = P();
-    QColor bg = c.surface;
-    bg.setAlphaF(0.94);
+    if (Theme::I().apple()) {
+        p.setBrush(c.surface);
+        p.setPen(QPen(QColor(255, 255, 255, 28), 1));
+        p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 12, 12);
+        return;
+    }
+    // near-black base (YT Music) with the Noctalia hue showing through, and a soft colour glow
+    // pouring down from the top edge (Spotube / YT Music home)
+    auto mix = [](const QColor &a, const QColor &b, qreal t) {
+        return QColor::fromRgbF(a.redF() * (1 - t) + b.redF() * t, a.greenF() * (1 - t) + b.greenF() * t,
+                                a.blueF() * (1 - t) + b.blueF() * t, a.alphaF());
+    };
+    QColor bg = mix(c.surface, Qt::black, 0.80);   // almost black, only a hint of the Noctalia hue
+    bg.setAlphaF(0.97);
+    const QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
     p.setBrush(bg);
+    p.setPen(Qt::NoPen);
+    p.drawRoundedRect(r, 24, 24);
+    // the glow takes the colour of whatever is playing (falls back to the Noctalia accent)
+    QColor art = Thumbs::I().accent(core->nowVid());
+    if (!art.isValid()) art = mix(c.secondary, c.primary, 0.25);
+    QLinearGradient glow(0, 0, 0, height() * 0.92);
+    QColor g0 = mix(art, c.secondary, 0.15);
+    g0.setAlphaF(0.62);
+    QColor g1 = g0;
+    g1.setAlphaF(0.0);
+    QColor gm = g0;
+    gm.setAlphaF(0.20);
+    glow.setColorAt(0, g0);
+    glow.setColorAt(0.45, gm);
+    glow.setColorAt(1, g1);
+    p.setBrush(glow);
+    p.drawRoundedRect(r, 24, 24);
+    p.setBrush(Qt::NoBrush);
     p.setPen(QPen(c.outline, 1));
-    p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 24, 24);
+    p.drawRoundedRect(r, 24, 24);
 }
 
 // -------------------------------------------------- frameless move / resize
@@ -505,13 +830,17 @@ void MainWindow::keyPressEvent(QKeyEvent *e) {
     const bool ctrl = e->modifiers() & Qt::ControlModifier;
     switch (e->key()) {
     case Qt::Key_L:
-        if (ctrl) { search->edit->setFocus(); search->edit->selectAll(); }
+        if (ctrl) { if (lyricsView->isVisible()) lyricsView->closeView(); search->edit->setFocus(); search->edit->selectAll(); }
         else if (auto *t = core->nowPlaying()) core->toggleLike(*t);
         break;
     case Qt::Key_Q:
         if (ctrl) qApp->quit();
         break;
-    case Qt::Key_Slash: search->edit->setFocus(); search->edit->selectAll(); break;
+    case Qt::Key_Slash:
+        if (lyricsView->isVisible()) lyricsView->closeView();
+        search->edit->setFocus();
+        search->edit->selectAll();
+        break;
     case Qt::Key_Space: core->togglePlay(); break;
     case Qt::Key_N: core->next(false); break;
     case Qt::Key_P: core->prev(); break;
@@ -530,7 +859,7 @@ void MainWindow::keyPressEvent(QKeyEvent *e) {
     case Qt::Key_Right: core->seekBy(5); break;
     case Qt::Key_Up: core->setVolume(core->volume + 5); break;
     case Qt::Key_Down: core->setVolume(core->volume - 5); break;
-    case Qt::Key_Y: lyricsView->toggle(); break;
+    case Qt::Key_Y: toggleNowPlaying(); break;
     case Qt::Key_Escape: if (lyricsView->isVisible()) lyricsView->closeView(); else hide(); break;
     default: QWidget::keyPressEvent(e);
     }
@@ -736,7 +1065,7 @@ void MainWindow::onAction(int id) {
     bool ok = false;
     switch (id) {
     case 8: openSettings(); break;
-    case 7: lyricsView->toggle(); break;
+    case 7: toggleNowPlaying(); break;
     case 10: core->playFrom(t, 0, false); break;
     case 11: core->playFrom(t, 0, true); break;
     case 12: core->enqueueAll(t); showToast(QStringLiteral("Added %1 songs to the queue").arg(core->list(t).size())); break;

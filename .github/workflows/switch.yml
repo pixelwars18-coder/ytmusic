@@ -3,6 +3,9 @@ on:
   push:
     branches: [switch, main]
     paths: ['ytmusic-switch/**', '.github/workflows/switch.yml']
+  # Pull requests: same build and screenshots; the results go to the switch-ci branch like any other run.
+  pull_request:
+    paths: ['ytmusic-switch/**', '.github/workflows/switch.yml']
   workflow_dispatch:
 permissions:
   contents: write

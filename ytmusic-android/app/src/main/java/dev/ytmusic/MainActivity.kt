@@ -152,6 +152,8 @@ class MainActivity : Activity() {
             setHasFixedSize(true)
             itemAnimator = null
             setItemViewCacheSize(6)
+            // a fling goes through rows faster than the default pool of five can hand them back
+            recycledViewPool.setMaxRecycledViews(0, 16)
             overScrollMode = View.OVER_SCROLL_NEVER
             clipToPadding = false
             setPadding(0, 0, 0, Ui.dpi(8))
@@ -220,7 +222,11 @@ class MainActivity : Activity() {
         refreshQueued = false
         if (dirtyData && !reordering) { dirtyData = false; rebuild() }
         // rows keep cached display lists: invalidating the RecyclerView alone does not redraw them
-        for (i in 0 until list.childCount) list.getChildAt(i).invalidate()
+        for (i in 0 until list.childCount) {
+            val child = list.getChildAt(i)
+            child.invalidate()
+            if (child is RecyclerView) for (j in 0 until child.childCount) child.getChildAt(j).invalidate()   // cards of a shelf
+        }
         mini.invalidate(); if (now.visibility == View.VISIBLE) now.invalidate()
     }
     private fun scheduleRefresh() { if (!refreshQueued) { refreshQueued = true; App.main.postDelayed(refreshRun, 40) } }
@@ -240,7 +246,8 @@ class MainActivity : Activity() {
         Library.listeners.add(dataListener); Store.listeners.add(dataListener)
         Playback.listeners.add(playbackListener); Downloads.listeners.add(downloadsListener); Thumbs.listeners.add(drawListener)
         Updater.listeners.add(updateListener); ForYou.listeners.add(forYouListener)
-        ForYou.refreshIfStale()
+        // rebuilding the picks is a burst of network lookups: let the first screen draw (and its covers load) first
+        App.main.postDelayed({ if (started) ForYou.refreshIfStale() }, 1200)
         rebuild()
         renderUpdateBar()
         Updater.autoCheck()
@@ -290,6 +297,9 @@ class MainActivity : Activity() {
         closeSuggestions()
         rebuild()
         list.scrollToPosition(0)
+        list.animate().cancel()
+        list.alpha = 0f
+        list.animate().alpha(1f).setDuration(140).start()
     }
 
     private fun openNowPlaying() {
@@ -469,9 +479,10 @@ class MainActivity : Activity() {
                     out += Item.Header("Jump back in", "Pick up where you left off", r)
                     out += Item.Strip(r)
                 }
+                // every shelf is a row of cover cards you swipe through (long-press a card for the song menu)
                 for (sec in ForYou.sections) {
                     out += Item.Header(sec.title, sec.subtitle, sec.tracks)
-                    sec.tracks.take(8).forEachIndexed { i, t -> out += Item.T(t, sec.tracks, i) }
+                    out += Item.Strip(sec.tracks.take(20))
                 }
             } else {
                 val d = Library.detail
@@ -649,7 +660,7 @@ class MainActivity : Activity() {
                     layoutManager = LinearLayoutManager(parent.context, LinearLayoutManager.HORIZONTAL, false)
                     overScrollMode = View.OVER_SCROLL_NEVER; itemAnimator = null; setHasFixedSize(true)
                     setPadding(Ui.dpi(10), 0, Ui.dpi(10), 0); clipToPadding = false
-                    layoutParams = RecyclerView.LayoutParams(-1, Ui.dpi(192))
+                    layoutParams = RecyclerView.LayoutParams(-1, Ui.dpi(if (Ui.compact) 192 else 212))
                 }
                 object : RecyclerView.ViewHolder(rv) {}
             } else if (viewType == 1) {
@@ -680,13 +691,25 @@ class MainActivity : Activity() {
         }
     }
 
+    private inner class StripAdapter(var tracks: List<Track>) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+        override fun getItemCount() = tracks.size
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder = object : RecyclerView.ViewHolder(CardView(parent.context)) {}
+        override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+            val shelf = tracks
+            val card = holder.itemView as CardView
+            card.track = shelf[position]
+            card.onClick = { Playback.play(shelf, position) }
+            card.onLong = { showTrackMenu(card, shelf[position], -1) }
+        }
+    }
+
+    /** A shelf keeps its adapter (and so its scroll position and cards) for as long as it shows the same songs. */
     private fun bindStrip(rv: RecyclerView, tracks: List<Track>) {
-        rv.adapter = object : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
-            override fun getItemCount() = tracks.size
-            override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) = object : RecyclerView.ViewHolder(CardView(parent.context)) {}
-            override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
-                (holder.itemView as CardView).apply { track = tracks[position]; onClick = { Playback.play(tracks, position) } }
-            }
+        val a = rv.adapter as? StripAdapter
+        when {
+            a == null -> rv.adapter = StripAdapter(tracks)
+            a.tracks == tracks -> for (i in 0 until rv.childCount) rv.getChildAt(i).invalidate()
+            else -> { a.tracks = tracks; a.notifyDataSetChanged(); rv.scrollToPosition(0) }
         }
     }
 

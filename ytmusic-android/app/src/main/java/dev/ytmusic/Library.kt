@@ -37,6 +37,14 @@ object Library {
     private var listsMore: (() -> PlaylistPage)? = null
     private var gen = 0
 
+    /** First page of recent searches: repeating one (history, back and forth between Songs / Playlists) is instant. */
+    private class Cached(val songs: Page?, val lists: PlaylistPage?, val at: Long)
+    private val cache = object : LinkedHashMap<String, Cached>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Cached>?) = size > 24
+    }
+    private fun cacheKey(m: Mode, q: String) = m.name + "\n" + q.lowercase()
+    private const val CACHE_MS = 10 * 60_000L
+
     val canLoadMore get() = !searching && when (mode) {
         Mode.SONGS -> songsMore != null && songs.isNotEmpty()
         Mode.PLAYLISTS -> listsMore != null && lists.isNotEmpty()
@@ -69,16 +77,28 @@ object Library {
         searching = true
         status = "Searching…"
         if (mode == Mode.SONGS) { songs.clear(); songsMore = null } else { lists.clear(); listsMore = null }
-        changed()
         val m = mode
+        val key = cacheKey(m, text)
+        val hit = cache[key]?.takeIf { System.currentTimeMillis() - it.at < CACHE_MS }
+        if (hit != null) {
+            if (m == Mode.SONGS && hit.songs != null) { songs += hit.songs.items; songsMore = hit.songs.more; finish(false); Prefetch.warm(songs); return }
+            if (m == Mode.PLAYLISTS && hit.lists != null) { lists += hit.lists.items; listsMore = hit.lists.more; finish(false); return }
+        }
+        changed()
         App.io.execute {
             try {
                 if (m == Mode.SONGS) {
                     val page = Yt.search(text)
-                    App.main.post { if (my == gen) { songs += page.items; songsMore = page.more; finish(songs.isEmpty()) } }
+                    App.main.post {
+                        if (page.items.isNotEmpty()) cache[key] = Cached(page, null, System.currentTimeMillis())
+                        if (my == gen) { songs += page.items; songsMore = page.more; finish(songs.isEmpty()); Prefetch.warm(songs) }
+                    }
                 } else {
                     val page = Yt.searchPlaylists(text)
-                    App.main.post { if (my == gen) { lists += page.items; listsMore = page.more; finish(lists.isEmpty()) } }
+                    App.main.post {
+                        if (page.items.isNotEmpty()) cache[key] = Cached(null, page, System.currentTimeMillis())
+                        if (my == gen) { lists += page.items; listsMore = page.more; finish(lists.isEmpty()) }
+                    }
                 }
             } catch (e: Throwable) {
                 Crash.record("search \"$text\" ($m)", e)
@@ -124,7 +144,7 @@ object Library {
         App.io.execute {
             try {
                 val page = Yt.playlistTracks(ref.url)
-                App.main.post { if (detail === d) { d.tracks += page.items; d.more = page.more; d.loading = false; if (d.tracks.isEmpty()) d.status = "Empty playlist"; changed() } }
+                App.main.post { if (detail === d) { d.tracks += page.items; d.more = page.more; d.loading = false; if (d.tracks.isEmpty()) d.status = "Empty playlist"; changed(); Prefetch.warm(d.tracks, 1) } }
             } catch (e: Throwable) {
                 Crash.record("open playlist ${ref.name} ${ref.url}", e)
                 App.main.post { if (detail === d) { d.loading = false; d.status = friendly(e); changed() } }

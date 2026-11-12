@@ -22,6 +22,7 @@ object Yt {
     private val service: StreamingService get() = ServiceList.YouTube
     @Volatile private var ready = false
     private val urlCache = ConcurrentHashMap<String, Audio>()
+    private val resolveLocks = ConcurrentHashMap<String, Any>()
     /** Preferred audio bitrate in kbps (0 = the highest available). */
     @Volatile var targetKbps = 128
         set(v) { if (v != field) { field = v; urlCache.clear() } }
@@ -153,6 +154,16 @@ object Yt {
     /** Best audio-only stream: prefers AAC/M4A (hardware decoded everywhere), ~128 kbps by default. */
     fun resolve(vid: String, forceFresh: Boolean = false): Audio {
         if (!forceFresh) urlCache[vid]?.let { if (!it.expired) return it }
+        // One lookup per song at a time: playing a song whose URL is already being fetched ahead of time
+        // waits for that result instead of starting a second lookup.
+        val lock = resolveLocks.getOrPut(vid) { Any() }
+        return synchronized(lock) {
+            val ready = if (forceFresh) null else urlCache[vid]?.takeIf { !it.expired }
+            ready ?: extract(vid)
+        }
+    }
+
+    private fun extract(vid: String): Audio {
         init()
         val ex = service.getStreamExtractor(watchUrl(vid))
         ex.fetchPage()

@@ -70,13 +70,19 @@ private:
     std::string pickFont(const std::string &s, int size, bool bold, int &which);
     struct Cached { SDL_Texture *tex; int w, h; unsigned frame; };
     std::unordered_map<std::string, Cached> cache;
+    // what a text() request (string, size, width limit, colour) came to: the key of its texture in `cache`.
+    // Saves choosing the font and trimming to fit, which measure the string over and over, on every frame.
+    struct Layout { std::string key; unsigned frame; };
+    std::unordered_map<std::string, Layout> layouts;
+    std::unordered_map<std::string, int> measured;   // measure() results, in device pixels
     std::map<std::tuple<int, bool, int>, TTF_Font *> fonts;
     std::vector<FontBlob> blobs;
     unsigned frameNo = 0;
     SDL_Texture *maskTex = nullptr;
 };
 
-// Album art from i.ytimg.com, fetched by two worker threads, turned into textures on the main thread.
+// Album art from i.ytimg.com: fetched and decoded by two worker threads, uploaded as textures on the main
+// thread (a couple per frame).
 class Thumbs {
 public:
     void start(SDL_Renderer *r);
@@ -89,7 +95,7 @@ private:
     std::mutex mu;
     std::condition_variable cv;
     std::deque<std::string> want;
-    std::vector<std::pair<std::string, std::string>> ready;   // vid, jpeg bytes
+    std::vector<std::pair<std::string, SDL_Surface *>> ready;   // vid, decoded square picture
     std::unordered_map<std::string, SDL_Texture *> tex;
     std::list<std::string> lru;
     std::unordered_map<std::string, bool> requested;

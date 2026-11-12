@@ -20,7 +20,11 @@ object Thumbs {
     private lateinit var cache: LruCache<String, Bitmap>
     private val pending = HashSet<String>()
     private val failed = HashMap<String, Long>()   // key -> when it failed; retried after a while
-    private val exec = Executors.newFixedThreadPool(2)
+    /** Four loaders (a screen of results is a dozen small images); the threads exit when idle. */
+    private val exec = (Executors.newFixedThreadPool(4) as java.util.concurrent.ThreadPoolExecutor).apply {
+        setKeepAliveTime(15, java.util.concurrent.TimeUnit.SECONDS)
+        allowCoreThreadTimeOut(true)
+    }
     val listeners = CopyOnWriteArrayList<() -> Unit>()
     @Volatile private var notifyQueued = false
 

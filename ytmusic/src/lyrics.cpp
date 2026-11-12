@@ -2,6 +2,7 @@
 #include "paths.h"
 #include "ui_common.h"
 #include "theme.h"
+#include "thumbs.h"
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -86,6 +87,9 @@ LyricsView::LyricsView(Core *c, QWidget *parent) : QWidget(parent), core(c) {
         update();
     });
     connect(core, &Core::trackChanged, this, [this] { if (isVisible()) load(); });
+    connect(core, &Core::listsChanged, this, [this] { if (isVisible()) update(); });   // "up next"
+    connect(&Thumbs::I(), &Thumbs::ready, this, [this] { if (isVisible()) update(); });
+    connect(&Theme::I(), &Theme::changed, this, [this] { if (isVisible()) update(); });
 }
 
 QString LyricsView::cachePath(const QString &v) const { return Paths::cacheDir() + QStringLiteral("/lyrics/") + v + QStringLiteral(".json"); }
@@ -221,7 +225,7 @@ int LyricsView::currentIndex() const {
 
 void LyricsView::layoutLines() {
     boxes.clear();
-    const qreal w = width() - 80;
+    const qreal w = lyrW(), x = lyrX();
     qreal y = 0;
     QFont f = fnt(22, QFont::Bold);
     const QFontMetrics fm(f);
@@ -232,7 +236,7 @@ void LyricsView::layoutLines() {
     }
     for (const Line &l : std::as_const(lines)) {
         const QRect r = fm.boundingRect(QRect(0, 0, int(w), 10000), Qt::TextWordWrap, l.text);
-        boxes.append(QRectF(40, y, w, r.height() + 6));
+        boxes.append(QRectF(x, y, w, r.height() + 6));
         y += r.height() + 26;
     }
     contentH = y + 200;
@@ -257,32 +261,119 @@ void LyricsView::mousePressEvent(QMouseEvent *e) {
 void LyricsView::paintEvent(QPaintEvent *) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
+    p.setRenderHint(QPainter::SmoothPixmapTransform);
     const Palette &c = P();
     p.setPen(Qt::NoPen);
-    p.setBrush(c.surface);
-    p.drawRoundedRect(rect(), 18, 18);
+    if (Theme::I().apple()) {
+        p.setBrush(c.surface);
+        p.drawRoundedRect(rect(), 10, 10);
+    } else {   // deep base with a colour wash from the top, so it matches the window glow instead of being a flat slab
+        QColor base = QColor::fromRgbF(c.surface.redF() * 0.58, c.surface.greenF() * 0.58, c.surface.blueF() * 0.58);
+        p.setBrush(base);
+        p.drawRoundedRect(rect(), 22, 22);
+        QLinearGradient g(0, 0, 0, height());
+        QColor g0 = c.secondary, g1 = c.primary;
+        g0.setAlphaF(0.30);
+        g1.setAlphaF(0.0);
+        g.setColorAt(0, g0);
+        g.setColorAt(1, g1);
+        p.setBrush(g);
+        p.drawRoundedRect(rect(), 22, 22);
+    }
 
     const Track *t = core->nowPlaying();
-    p.setPen(c.onSurface);
-    p.setFont(fnt(14, QFont::Medium));
-    p.drawText(QRectF(40, 10, width() - 120, 22), Qt::AlignVCenter, t ? QFontMetrics(fnt(14, QFont::Medium)).elidedText(t->title, Qt::ElideRight, width() - 120) : QString());
-    p.setPen(c.onSurfaceVariant);
-    p.setFont(fnt(12));
-    p.drawText(QRectF(40, 30, width() - 120, 18), Qt::AlignVCenter, t ? t->artist : QString());
-    p.drawText(QRectF(width() - 70, 10, 50, 22), Qt::AlignVCenter | Qt::AlignRight, QStringLiteral("close"));
+    const bool wide = split();
+    const qreal lx = lyrX(), lw = lyrW();
 
+    if (wide) {
+        // ---- left column: artwork, title, artist, up next
+        QFont cap = fnt(10, QFont::Bold);
+        cap.setLetterSpacing(QFont::AbsoluteSpacing, 1.1);
+        p.setFont(cap);
+        p.setPen(c.onSurfaceVariant);
+        p.drawText(QRectF(32, 16, 200, 22), Qt::AlignVCenter, QStringLiteral("NOW PLAYING"));
+
+        const qreal aw = leftW() - 32;
+        const QRectF art(32, 52, aw, qRound(aw * 9 / 16));
+        drawThumb(p, art, t ? t->vid : QString(), 18);
+        if (t) {
+            // sharper artwork where YouTube has it (not every video does; the standard thumbnail stays underneath)
+            const QPixmap hq = Thumbs::I().getUrl(t->vid + QStringLiteral(":hq"), QStringLiteral("https://i.ytimg.com/vi/%1/hq720.jpg").arg(t->vid),
+                                                  art.size().toSize(), devicePixelRatioF(), 18);
+            if (!hq.isNull()) p.drawPixmap(art.topLeft(), hq);
+        }
+        qreal y = art.bottom() + 18;
+        if (t) {
+            const QFont ft = fnt(20, QFont::Bold);
+            const QFontMetrics fm(ft);
+            const int full = fm.boundingRect(QRect(0, 0, int(aw), 2000), Qt::TextWordWrap, t->title).height();
+            const int shown = qMin(full, 2 * fm.lineSpacing());
+            p.save();
+            p.setClipRect(QRectF(32, y, aw, shown));
+            p.setFont(ft);
+            p.setPen(c.onSurface);
+            p.drawText(QRectF(32, y, aw, full), Qt::TextWordWrap | Qt::AlignTop | Qt::AlignLeft, t->title);
+            p.restore();
+            y += shown + 6;
+            p.setFont(fnt(14));
+            p.setPen(c.secondary);
+            p.drawText(QRectF(32, y, aw, 22), Qt::AlignVCenter, QFontMetrics(fnt(14)).elidedText(t->artist, Qt::ElideRight, int(aw)));
+            y += 22 + 22;
+
+            p.setFont(cap);
+            p.setPen(c.onSurfaceVariant);
+            if (y + 22 + 44 < height() - 12) {
+                p.drawText(QRectF(32, y, aw, 20), Qt::AlignVCenter, QStringLiteral("UP NEXT"));
+                y += 28;
+                const QFont fT = fnt(13, QFont::Medium), fA = fnt(12);
+                if (core->shuffle) {
+                    p.setFont(fA);
+                    p.drawText(QRectF(32, y, aw, 20), Qt::AlignVCenter, QStringLiteral("Shuffle is on"));
+                } else {
+                    int shownRows = 0;
+                    for (int i = core->current + 1; i < core->queue.size() && shownRows < 5 && y + 44 < height() - 12; ++i, ++shownRows) {
+                        const Track &n = core->queue[i];
+                        drawThumb(p, QRectF(32, y + 2, 64, 36), n.vid, 8);
+                        const qreal tx = 32 + 64 + 12, tw = aw - 64 - 12;
+                        p.setFont(fT);
+                        p.setPen(c.onSurface);
+                        p.drawText(QRectF(tx, y, tw, 20), Qt::AlignVCenter, QFontMetrics(fT).elidedText(n.title, Qt::ElideRight, int(tw)));
+                        p.setFont(fA);
+                        p.setPen(c.onSurfaceVariant);
+                        p.drawText(QRectF(tx, y + 20, tw, 18), Qt::AlignVCenter, QFontMetrics(fA).elidedText(n.artist, Qt::ElideRight, int(tw)));
+                        y += 46;
+                    }
+                    if (shownRows == 0) {
+                        p.setFont(fA);
+                        p.setPen(c.onSurfaceVariant);
+                        p.drawText(QRectF(32, y, aw, 20), Qt::AlignVCenter, QStringLiteral("Nothing queued after this"));
+                    }
+                }
+            }
+        }
+    } else {
+        p.setPen(c.onSurface);
+        p.setFont(fnt(14, QFont::Medium));
+        p.drawText(QRectF(40, 10, width() - 120, 22), Qt::AlignVCenter, t ? QFontMetrics(fnt(14, QFont::Medium)).elidedText(t->title, Qt::ElideRight, width() - 120) : QString());
+        p.setPen(c.onSurfaceVariant);
+        p.setFont(fnt(12));
+        p.drawText(QRectF(40, 30, width() - 120, 18), Qt::AlignVCenter, t ? t->artist : QString());
+    }
+    drawIconButton(p, QRectF(width() - 14 - 32, 12, 32, 32), QStringLiteral("x"), false);
+
+    // ---- lyrics
     p.save();
-    p.setClipRect(QRectF(0, 56, width(), height() - 56));
+    p.setClipRect(QRectF(wide ? lx - 12 : 0, 56, wide ? lw + 52 : width(), height() - 56 - 12));
     p.translate(0, 56 - scrollY);
     if (!message.isEmpty()) {
         p.resetTransform();
         p.setPen(c.onSurfaceVariant);
         p.setFont(fnt(15));
-        p.drawText(QRectF(0, 56, width(), height() - 56), Qt::AlignCenter, message);
+        p.drawText(QRectF(wide ? lx : 0, 56, wide ? lw : width(), height() - 56), Qt::AlignCenter, message);
     } else if (!plain.isEmpty()) {
         p.setPen(c.onSurface);
         p.setFont(fnt(16));
-        p.drawText(QRectF(40, 20, width() - 80, contentH), Qt::TextWordWrap, plain);
+        p.drawText(QRectF(lx, 20, lw, contentH), Qt::TextWordWrap, plain);
     } else {
         const int cur = currentIndex();
         QFont f = fnt(22, QFont::Bold);

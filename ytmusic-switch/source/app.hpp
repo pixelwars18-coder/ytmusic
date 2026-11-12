@@ -64,7 +64,20 @@ private:
     std::vector<Job> jobs;
 
     // logic
-    std::vector<Row> rows();
+    using Rows = std::vector<Row>;
+    Rows rows();
+    // rows(), rebuilt only when what it shows changed. Song lists can be hundreds of rows and every frame asks
+    // for them several times; the shared pointer keeps a snapshot valid while an action edits the list.
+    std::shared_ptr<const Rows> rowsShared();
+    uint64_t rowsSignature();
+    std::shared_ptr<const Rows> rowCache;
+    uint64_t rowSig = 0;
+    unsigned frameCount = 0, tmpListFrame = ~0u;
+    // looks a song's stream up ahead of a likely A press; false if another lookup is still running
+    bool prefetch(const std::string &vid);
+    std::string dwellVid;
+    float dwellT = 0;
+    bool dwellDone = false;
     const std::vector<Track> *currentTracks();
     void activate(const Row &r);
     void openMenu(const Row *r);

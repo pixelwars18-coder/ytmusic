@@ -852,18 +852,21 @@ class HeroView(ctx: Context) : View(ctx) {
     }
 }
 
-/** A cover card for the horizontal "Jump back in" strip. */
+/** A cover card for the horizontal shelves of the "For you" page. Tap plays, long-press opens the song menu. */
 class CardView(ctx: Context) : View(ctx) {
     init { isFocusable = false; if (android.os.Build.VERSION.SDK_INT >= 26) defaultFocusHighlightEnabled = false }
     var track: Track? = null; set(v) { field = v; invalidate() }
     var onClick: (() -> Unit)? = null
+    var onLong: (() -> Unit)? = null
     private val tp = paint().apply { typeface = Ui.medium; textSize = Ui.dp(13) }
     private val sp = paint().apply { textSize = Ui.dp(12) }
     private val bp = paint()
     private val rect = RectF()
     private var down = false
-    private val side = Ui.dp(132)
-    override fun onMeasure(w: Int, h: Int) = setMeasuredDimension((side + Ui.dp(12)).toInt(), Ui.dp(188).toInt())
+    private var longFired = false
+    private val longPress = Runnable { if (down && onLong != null) { longFired = true; down = false; invalidate(); performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); onLong?.invoke() } }
+    private val side = if (Ui.compact) Ui.dp(132) else Ui.dp(152)
+    override fun onMeasure(w: Int, h: Int) = setMeasuredDimension((side + Ui.dp(12)).toInt(), (side + Ui.dp(56)).toInt())
     override fun onDraw(c: Canvas) {
         val t = track ?: return
         rect.set(Ui.dp(6), Ui.dp(4), Ui.dp(6) + side, Ui.dp(4) + side)
@@ -881,10 +884,10 @@ class CardView(ctx: Context) : View(ctx) {
     private var downX = 0f
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { down = true; downX = e.x; invalidate(); return true }
-            MotionEvent.ACTION_MOVE -> if (abs(e.x - downX) > Ui.dp(10)) { down = false; invalidate() }
-            MotionEvent.ACTION_UP -> { val d = down; down = false; invalidate(); if (d) onClick?.invoke() }
-            MotionEvent.ACTION_CANCEL -> { down = false; invalidate() }
+            MotionEvent.ACTION_DOWN -> { down = true; longFired = false; downX = e.x; invalidate(); if (onLong != null) postDelayed(longPress, 450); return true }
+            MotionEvent.ACTION_MOVE -> if (abs(e.x - downX) > Ui.dp(10)) { removeCallbacks(longPress); down = false; invalidate() }
+            MotionEvent.ACTION_UP -> { removeCallbacks(longPress); val d = down; down = false; invalidate(); if (d && !longFired) onClick?.invoke() }
+            MotionEvent.ACTION_CANCEL -> { removeCallbacks(longPress); down = false; invalidate() }
         }
         return true
     }

@@ -4,6 +4,7 @@
 #include <QElapsedTimer>
 #include <QSet>
 #include <QTimer>
+#include <QVariantAnimation>
 
 // Virtualised, custom-painted list: tracks (results / queue / liked / a playlist) or playlist
 // cards (playlist search results, your saved playlists), plus recent-search chips, a spinner
@@ -33,9 +34,10 @@ protected:
     void mousePressEvent(QMouseEvent *) override;
     void leaveEvent(QEvent *) override;
     void resizeEvent(QResizeEvent *) override;
+    void wheelEvent(QWheelEvent *) override;
 private:
     enum Kind { None, Row, Like, AddPl, Act1, Act2, LoadMore, Chip, ClearHist, HeaderPlay, HeaderShuffle, HeroRefresh };
-    struct Hit { Kind kind = None; int idx = -1; };
+    struct Hit { Kind kind = None; int idx = -1; int sub = -1; };
     static constexpr int kRowH = 68, kRowInner = 64;
 
     struct ChipItem { QRectF r; QString text; };
@@ -51,10 +53,13 @@ private:
     void rowRects(int i, QRectF &row, QRectF &like, QRectF &addpl, QRectF &a1, QRectF &a2, QRectF &dur) const;
     void rowRectsAt(qreal y, QRectF &row, QRectF &like, QRectF &addpl, QRectF &a1, QRectF &a2, QRectF &dur) const;
 
-    // "For you" page: hero + shelves (header + up to 8 rows each), laid out in a flat list
-    struct FeedItem { int kind; int section; int track; int y; int h; };   // kind: 0 hero, 1 header, 2 row
+    // "For you" page: a status line, then shelves (header + a grid of artwork cards), laid out in a flat list
+    struct FeedItem { int kind; int section; int track; int y; int h; int x; int w; };   // kind: 0 status, 1 header, 2 card
+    int feedThumbH = 90;     // artwork height of a card at the current width
     bool feedMode() const { return tab == Tab::Home; }
     void rebuildFeed();
+    static const QStringList &moods();
+    QVector<QRectF> moodRects(qreal width) const;
     Hit hitFeed(const QPoint &vp) const;
     void paintFeed(QPainter &p);
     void pressFeed(const Hit &h);
@@ -74,4 +79,8 @@ private:
     const Track *trackAt(const Hit &h) const;
     void drawDlBadge(QPainter &p, const QRectF &thumb, const QString &vid) const;
     QElapsedTimer clock;
+    // wheel scrolling glides to its target instead of jumping; a tab change fades the new list in
+    QVariantAnimation scrollAnim, fadeAnim;
+    int scrollTarget = 0;
+    qreal fade = 1.0;
 };

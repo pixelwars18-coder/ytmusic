@@ -1,0 +1,86 @@
+name: Desktop build
+# Compiles the Qt app and renders its pages off-screen, so a change can be looked at before it is merged.
+on:
+  push:
+    branches: [main]
+    paths: ['ytmusic/**', '.github/workflows/desktop.yml']
+  pull_request:
+    paths: ['ytmusic/**', '.github/workflows/desktop.yml']
+  workflow_dispatch:
+permissions:
+  contents: write   # results (log + screenshots) go to the desktop-ci branch
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qt6-base-dev cmake ninja-build libgl1-mesa-dev dbus fonts-dejavu-core curl > /tmp/apt.log 2>&1 || tail -30 /tmp/apt.log
+          pipx install yt-dlp > /dev/null 2>&1 || true
+      - name: Build
+        working-directory: ytmusic
+        run: |
+          set -o pipefail
+          cmake -B build -G Ninja 2>&1 | tail -5
+          ninja -C build 2>&1 | tee /tmp/build.log
+      - name: Screenshots (off-screen)
+        if: success()
+        working-directory: ytmusic
+        env:
+          QT_QPA_PLATFORM: offscreen
+          XDG_STATE_HOME: /tmp/yt-state
+          XDG_CACHE_HOME: /tmp/yt-cache
+          XDG_RUNTIME_DIR: /tmp/yt-run
+        run: |
+          mkdir -p /tmp/yt-state/ytmusic /tmp/yt-cache /tmp/yt-run /tmp/shots && chmod 700 /tmp/yt-run
+          # a small library so the pages have something to show without depending on YouTube answering
+          python3 - <<'PY'
+          import json, time
+          def t(v, title, artist, d): return {"vid": v, "title": title, "artist": artist, "duration": d}
+          songs = [t("dQw4w9WgXcQ", "Never Gonna Give You Up (Official Video)", "Rick Astley", 213),
+                   t("9bZkp7q19f0", "PSY - GANGNAM STYLE", "officialpsy", 252),
+                   t("kJQP7kiw5Fk", "Luis Fonsi - Despacito ft. Daddy Yankee", "Luis Fonsi", 282),
+                   t("JGwWNGJdvx8", "Ed Sheeran - Shape of You (Official Music Video)", "Ed Sheeran", 263),
+                   t("OPf0YbXqDm0", "Mark Ronson - Uptown Funk (Official Video) ft. Bruno Mars", "Mark Ronson", 271),
+                   t("fJ9rUzIMcZQ", "Queen – Bohemian Rhapsody (Official Video Remastered)", "Queen Official", 359),
+                   t("hT_nvWreIhg", "OneRepublic - Counting Stars (Explicit)", "OneRepublic", 283),
+                   t("RgKAFK5djSk", "Wiz Khalifa - See You Again ft. Charlie Puth", "Wiz Khalifa", 237),
+                   t("YQHsXMglC9A", "Adele - Hello (Official Music Video)", "Adele", 367),
+                   t("CevxZvSJLk8", "Katy Perry - Roar", "Katy Perry", 270),
+                   t("09R8_2nJtjg", "Maroon 5 - Sugar (Official Music Video)", "Maroon 5", 301),
+                   t("lp-EO5I60KA", "Ed Sheeran - Thinking Out Loud", "Ed Sheeran", 297)]
+          feed = [{"id": "mix", "title": "Made for you", "subtitle": "Based on what you listen to", "tracks": songs[2:]},
+                  {"id": "trending", "title": "Trending music", "subtitle": "What everyone is playing right now", "tracks": songs[::-1]}]
+          pls = [{"id": "a1", "name": "Road trip", "source": "", "tracks": songs[:7]},
+                 {"id": "a2", "name": "Focus", "source": "", "tracks": songs[4:9]},
+                 {"id": "a3", "name": "A playlist with quite a long name to elide", "source": "x", "tracks": songs[1:4]}]
+          d = lambda x: json.dumps(x)
+          state = {"volume": 80, "likedJson": d(songs[:9]), "queueJson": d(songs), "recentJson": d(songs[:6]), "currentIdx": 3,
+                   "historyJson": d(["daft punk", "lofi"]), "playlistsJson": d(pls), "feedJson": d(feed),
+                   "feedAt": time.time() * 1000, "feedPlays": 0, "plays": 0}
+          json.dump(state, open("/tmp/yt-state/ytmusic/state.json", "w"))
+          PY
+          shot() { timeout 60 dbus-run-session -- ./build/ytmusic --shot "/tmp/shots/$1.png" "${@:2}" || echo "shot $1 failed ($?)"; }
+          shot home 4          # also warms the thumbnail cache
+          shot home2 4
+          shot queue 1
+          shot liked 2
+          shot playlists 3
+          shot playlist-open 3 - - opensaved
+          YTMUSIC_SHOT_LYRICS=1 shot now-playing 1
+          shot search 0 "daft punk"
+          ls -la /tmp/shots
+      - name: Publish result to the desktop-ci branch
+        if: always()
+        shell: bash
+        run: |
+          sha=$(git -C "$GITHUB_WORKSPACE" rev-parse --short HEAD)
+          mkdir -p /tmp/out && cd /tmp/out
+          cp /tmp/shots/*.png . 2>/dev/null || true
+          cp /tmp/build.log . 2>/dev/null || true
+          echo "${sha} ${{ job.status }} ${{ github.event_name }} ${{ github.head_ref || github.ref_name }}" > status.txt
+          git init -q && git checkout -q -b desktop-ci
+          git add -A && git -c user.name=ci -c user.email=ci@localhost commit -q -m "CI ${sha}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" desktop-ci
