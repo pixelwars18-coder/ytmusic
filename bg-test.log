@@ -1,0 +1,30 @@
+CRITICAL: You are using the SDL disk i/o audio driver!
+CRITICAL:  Writing to file [sdlaudio.raw].
+[opus @ 0x7def6c112b40] Could not update timestamps for skipped samples.
+[opus @ 0x7def6c0c8500] Could not update timestamps for skipped samples.
+[opus @ 0x7def6c0c8500] Could not update timestamps for discarded samples.
+[opus @ 0x7def6c001a40] Could not update timestamps for skipped samples.
+[opus @ 0x7def6c001a40] Could not update timestamps for skipped samples.
+  [bg] cmd 1 load
+start took 1703 ms
+PASS load + play (resolve, fetch to file, decode) | {"dur":213.061,"err":"","index":1,"pos":1.2805,"seq":1,"state":"playing","t":1794446094,"vid":"dQw4w9WgXcQ","vol":70}
+PASS position advances | {"dur":213.061,"err":"","index":1,"pos":3.4138333333333337,"seq":1,"state":"playing","t":1794446096,"vid":"dQw4w9WgXcQ","vol":70}
+  [bg] cmd 2 pause
+PASS pause | {"dur":213.061,"err":"","index":1,"pos":3.541833333333333,"seq":2,"state":"paused","t":1794446096,"vid":"dQw4w9WgXcQ","vol":70}
+PASS paused position holds | {"dur":213.061,"err":"","index":1,"pos":3.541833333333333,"seq":2,"state":"paused","t":1794446097,"vid":"dQw4w9WgXcQ","vol":70}
+  [bg] cmd 3 toggle
+PASS toggle resumes | {"dur":213.061,"err":"","index":1,"pos":3.541833333333333,"seq":3,"state":"playing","t":1794446097,"vid":"dQw4w9WgXcQ","vol":70}
+  [bg] cmd 4 seek
+PASS seek to 2:00 | {"dur":213.061,"err":"","index":1,"pos":120.16466666666666,"seq":4,"state":"playing","t":1794446098,"vid":"dQw4w9WgXcQ","vol":70}
+  [bg] cmd 5 prev
+PASS prev restarts song | {"dur":213.061,"err":"","index":1,"pos":0.9526666666666667,"seq":5,"state":"playing","t":1794446099,"vid":"dQw4w9WgXcQ","vol":70}
+  [bg] cmd 6 load
+PASS load song 0 at 3:26 | {"dur":213.061,"err":"","index":0,"pos":206.03666666666666,"seq":6,"state":"playing","t":1794446100,"vid":"dQw4w9WgXcQ","vol":70}
+PASS auto-advance to next song | {"dur":213.061,"err":"","index":1,"pos":0.03400000000000003,"seq":6,"state":"playing","t":1794446107,"vid":"dQw4w9WgXcQ","vol":70}
+  [bg] cmd 7 next
+PASS next wraps (repeat all) | {"dur":213.061,"err":"","index":0,"pos":0.043166666666666687,"seq":7,"state":"playing","t":1794446107,"vid":"dQw4w9WgXcQ","vol":70}
+  [bg] cmd 8 queue
+PASS queue edit keeps playing | {"dur":213.061,"err":"","index":1,"pos":1.963166666666667,"seq":8,"state":"playing","t":1794446109,"vid":"dQw4w9WgXcQ","vol":70}
+  [bg] cmd 9 quit
+PASS quit | {"dur":0.0,"err":"","index":-1,"pos":0.0,"seq":9,"state":"idle","t":1794446109,"vid":"","vol":70}
+ALL PASSED: 0 failure(s)
