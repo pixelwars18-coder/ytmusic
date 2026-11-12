@@ -10,7 +10,25 @@ Theme &Theme::I() {
     return t;
 }
 
+static Palette applePalette() {
+    Palette p;   // Apple Music, dark appearance
+    p.accent = QColor("#fa233b");
+    p.primary = QColor("#fa233b");
+    p.onPrimary = QColor("#ffffff");
+    p.secondary = QColor("#98989f");
+    p.tertiary = QColor("#ffffff");
+    p.surface = QColor("#1e1e1e");
+    p.surfaceVariant = QColor("#2b2b2d");
+    p.onSurface = QColor("#ffffff");
+    p.onSurfaceVariant = QColor("#98989f");
+    p.outline = QColor("#3a3a3c");
+    p.error = QColor("#ff453a");
+    return p;
+}
+
 Theme::Theme() {
+    appleLook = qgetenv("YTMUSIC_LOOK") != "noctalia";
+    if (appleLook) pal = applePalette();
     file = Paths::stateDir() + QStringLiteral("/theme.json");
     QDir().mkpath(Paths::stateDir());
     debounce.setSingleShot(true);
@@ -24,6 +42,7 @@ Theme::Theme() {
 }
 
 void Theme::reload() {
+    if (appleLook) { emit changed(); return; }
     if (!watcher.files().contains(file) && QFile::exists(file)) watcher.addPath(file);
     QFile f(file);
     if (!f.open(QIODevice::ReadOnly)) return;
@@ -44,6 +63,7 @@ void Theme::reload() {
     get("mOnSurfaceVariant", n.onSurfaceVariant);
     get("mOutline", n.outline);
     get("mError", n.error);
+    n.accent = n.primary;
     pal = n;
     emit changed();
 }

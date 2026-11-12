@@ -80,15 +80,15 @@ private:
 
 // ------------------------------------------------------------------ SearchBox
 SearchBox::SearchBox(QWidget *parent) : QWidget(parent) {
-    setFixedHeight(50);
+    setFixedHeight(Theme::I().apple() ? 34 : 50);
     setMouseTracking(true);
     edit = new QLineEdit(this);
     edit->setFrame(false);
-    edit->setPlaceholderText(QStringLiteral("Search YouTube or paste a link…   ( / )"));
+    edit->setPlaceholderText(Theme::I().apple() ? QStringLiteral("Search") : QStringLiteral("Search YouTube or paste a link…   ( / )"));
     edit->setContextMenuPolicy(Qt::DefaultContextMenu);
     auto restyle = [this] {
         const Palette &c = P();
-        edit->setFont(fnt(15));
+        edit->setFont(fnt(Theme::I().apple() ? 13 : 15));
         edit->setStyleSheet(QStringLiteral("QLineEdit{background:transparent;border:none;color:%1;"
                                            "selection-background-color:%2;selection-color:%3}")
                                 .arg(c.onSurface.name(), c.primary.name(), c.onPrimary.name()));
@@ -103,10 +103,17 @@ SearchBox::SearchBox(QWidget *parent) : QWidget(parent) {
     connect(edit, &QLineEdit::textChanged, this, qOverload<>(&QWidget::update));
 }
 
-QRectF SearchBox::goRect() const { return QRectF(width() - 6 - 38, 6, 38, 38); }
-QRectF SearchBox::clearRect() const { return QRectF(goRect().left() - 4 - 32, 9, 32, 32); }
+QRectF SearchBox::goRect() const { return Theme::I().apple() ? QRectF() : QRectF(width() - 6 - 38, 6, 38, 38); }
+QRectF SearchBox::clearRect() const {
+    return Theme::I().apple() ? QRectF(width() - 6 - 22, 6, 22, 22) : QRectF(goRect().left() - 4 - 32, 9, 32, 32);
+}
 
 void SearchBox::resizeEvent(QResizeEvent *) {
+    if (Theme::I().apple()) {
+        const int right = edit->text().isEmpty() ? width() - 8 : int(clearRect().left()) - 2;
+        edit->setGeometry(32, 3, right - 32, 28);
+        return;
+    }
     const int right = edit->text().isEmpty() ? int(goRect().left()) - 8 : int(clearRect().left()) - 4;
     edit->setGeometry(18 + 20 + 10, 8, right - 48, 34);
 }
@@ -120,6 +127,14 @@ void SearchBox::paintEvent(QPaintEvent *) {
     fill.setAlphaF(focus ? 0.13 : 0.08);
     p.setBrush(fill);
     p.setPen(focus ? QPen(c.primary, 2) : Qt::NoPen);
+    if (Theme::I().apple()) {
+        p.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), 8, 8);
+        Icons::paint(p, QRectF(10, 9, 16, 16), QStringLiteral("search"), c.onSurfaceVariant);
+        if (!edit->text().isEmpty()) drawIconButton(p, clearRect(), QStringLiteral("x"), hover == 1);
+        const int right = edit->text().isEmpty() ? width() - 8 : int(clearRect().left()) - 2;
+        if (edit->width() != right - 32) edit->setGeometry(32, 3, right - 32, 28);
+        return;
+    }
     p.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), 25, 25);
     Icons::paint(p, QRectF(18, 15, 20, 20), QStringLiteral("search"), c.onSurfaceVariant);
     if (!edit->text().isEmpty()) drawIconButton(p, clearRect(), QStringLiteral("x"), hover == 1);
@@ -152,8 +167,12 @@ void SearchBox::mousePressEvent(QMouseEvent *e) {
 
 // -------------------------------------------------------------------- SideBar
 namespace {
-constexpr int kNavTop = 62, kNavH = 40, kNavGap = 4, kPlRow = 34;
+inline bool apl() { return Theme::I().apple(); }
 }
+#define kNavTop (apl() ? 58 : 62)
+#define kNavH (apl() ? 32 : 40)
+#define kNavGap (apl() ? 2 : 4)
+#define kPlRow (apl() ? 30 : 34)
 
 SideBar::SideBar(Core *c, QWidget *parent) : QWidget(parent), core(c) {
     setMouseTracking(true);
@@ -193,7 +212,7 @@ QVector<SideBar::Item> SideBar::items() const {
         v.append({QRectF(x, y, w, kNavH), Nav, int(t), label, icon, QString(), count > 0 ? QString::number(count) : QString(), active});
         y += kNavH + kNavGap;
     };
-    nav(Tab::Home, QStringLiteral("For you"), QStringLiteral("home"), 0);
+    nav(Tab::Home, Theme::I().apple() ? QStringLiteral("Listen Now") : QStringLiteral("For you"), QStringLiteral("home"), 0);
     nav(Tab::Results, QStringLiteral("Search"), QStringLiteral("search"), 0);
     nav(Tab::Queue, QStringLiteral("Queue"), QStringLiteral("list"), int(core->queue.size()));
     nav(Tab::Liked, QStringLiteral("Liked songs"), QStringLiteral("heart"), int(core->liked.size()));
@@ -224,9 +243,14 @@ void SideBar::paintEvent(QPaintEvent *) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
     const Palette &c = P();
+    if (Theme::I().apple()) {   // flat sidebar, search field sits at its top (a separate widget), no brand mark
+        p.setBrush(QColor("#262628"));
+        p.drawRect(rect());
+        p.setPen(QColor(255, 255, 255, 20));
+        p.drawLine(width() - 1, 0, width() - 1, height());
+    } else {
     QColor panel = Qt::black;
     panel.setAlphaF(0.28);
-    p.setPen(Qt::NoPen);
     p.setBrush(panel);
     p.drawRoundedRect(QRectF(rect()), 22, 22);
 
@@ -239,6 +263,7 @@ void SideBar::paintEvent(QPaintEvent *) {
         p.setPen(c.onSurface);
         p.setFont(fnt(16, QFont::Bold));
         p.drawText(QRectF(logo.right() + 10, logo.top(), width() - logo.right() - 18, logo.height()), Qt::AlignVCenter, QStringLiteral("YT Music"));
+    }
     }
 
     const auto its = items();
@@ -262,7 +287,12 @@ void SideBar::paintEvent(QPaintEvent *) {
         p.save();
         if (it.kind == Playlist) p.setClipRect(area);
         p.setPen(Qt::NoPen);
-        if (it.active) {
+        if (Theme::I().apple()) {
+            if (it.active || hov) {
+                p.setBrush(QColor(255, 255, 255, it.active ? 36 : 16));
+                p.drawRoundedRect(it.r, 6, 6);
+            }
+        } else if (it.active) {
             QColor a = c.primary;
             a.setAlphaF(0.15);
             p.setBrush(a);
@@ -271,27 +301,28 @@ void SideBar::paintEvent(QPaintEvent *) {
             p.setBrush(c.outline);
             p.drawRoundedRect(it.r, 12, 12);
         }
-        const QColor fg = it.active ? c.primary : c.onSurface;
+        const QColor fg = (it.active && !Theme::I().apple()) ? c.primary : c.onSurface;
+        const QColor iconFg = Theme::I().apple() ? c.primary : fg;   // Apple Music tints sidebar icons with the accent
         const qreal cy = it.r.center().y();
         if (it.kind == Playlist) {
             const qreal bw = QFontMetrics(fBadge).horizontalAdvance(it.badge) + 6;
             const QRectF tr(it.r.left() + 12, it.r.top(), it.r.width() - 24 - bw, it.r.height());
             p.setFont(it.active ? fActive : fnt(13));
-            p.setPen(it.active ? c.primary : (hov ? c.onSurface : c.onSurfaceVariant));
+            p.setPen(Theme::I().apple() ? c.onSurface : (it.active ? c.primary : (hov ? c.onSurface : c.onSurfaceVariant)));
             p.drawText(tr, Qt::AlignVCenter | Qt::AlignLeft, QFontMetrics(p.font()).elidedText(it.label, Qt::ElideRight, int(tr.width())));
             p.setFont(fBadge);
             p.setPen(c.onSurfaceVariant);
             p.drawText(QRectF(it.r.right() - 10 - bw, it.r.top(), bw, it.r.height()), Qt::AlignVCenter | Qt::AlignRight, it.badge);
         } else {
             const QRectF ir = compact ? QRectF(it.r.center().x() - 10, cy - 10, 20, 20) : QRectF(it.r.left() + 13, cy - 10, 20, 20);
-            Icons::paint(p, ir, it.icon, fg, it.active && it.icon == QLatin1String("heart"));
+            Icons::paint(p, ir, it.icon, iconFg, it.active && it.icon == QLatin1String("heart"));
             if (!compact) {
                 p.setFont(it.active ? fActive : fLabel);
                 p.setPen(fg);
                 p.drawText(QRectF(it.r.left() + 45, it.r.top(), it.r.width() - 45 - 40, it.r.height()), Qt::AlignVCenter | Qt::AlignLeft, it.label);
                 if (!it.badge.isEmpty()) {
                     p.setFont(fBadge);
-                    p.setPen(it.active ? c.primary : c.onSurfaceVariant);
+                    p.setPen((it.active && !Theme::I().apple()) ? c.primary : c.onSurfaceVariant);
                     p.drawText(QRectF(it.r.right() - 46, it.r.top(), 34, it.r.height()), Qt::AlignVCenter | Qt::AlignRight, it.badge);
                 }
             }
@@ -410,7 +441,7 @@ QVector<TabsBar::Item> TabsBar::items() const {
     else if (savedOpen) title = core->savedOpen() ? core->savedOpen()->name : QString();
     else {
         switch (tab) {
-        case Tab::Home: title = QStringLiteral("For you"); break;
+        case Tab::Home: title = Theme::I().apple() ? QStringLiteral("Listen Now") : QStringLiteral("For you"); break;
         case Tab::Results: title = QStringLiteral("Search"); break;
         case Tab::Queue: title = QStringLiteral("Queue"); break;
         case Tab::Liked: title = QStringLiteral("Liked songs"); break;
@@ -471,7 +502,7 @@ void TabsBar::paintEvent(QPaintEvent *) {
         if (it.id == 9) drawIconButton(p, it.r, QStringLiteral("x"), hover == i);
         else if (it.id == 30) drawIconButton(p, it.r, QStringLiteral("back"), hover == i);
         else if (it.id == 31) {
-            const QFont f = fnt(20, QFont::Bold);
+            const QFont f = fnt(Theme::I().apple() ? 26 : 20, QFont::Bold);
             p.setFont(f);
             p.setPen(P().onSurface);
             p.drawText(it.r, Qt::AlignVCenter | Qt::AlignLeft, QFontMetrics(f).elidedText(it.label, Qt::ElideRight, int(it.r.width())));
@@ -574,6 +605,7 @@ MainWindow::MainWindow(Core *c, Mpris *mpris) : core(c) {
     auto drag = [this] { if (windowHandle()) windowHandle()->startSystemMove(); };
     connect(tabs, &TabsBar::dragRequested, this, drag);
     connect(side, &SideBar::dragRequested, this, drag);
+    connect(bar, &PlayerBar::dragRequested, this, drag);
 
     auto repaintAll = [this] {
         side->update();
@@ -671,6 +703,23 @@ QPixmap MainWindow::snapshot() {
 }
 
 void MainWindow::resizeEvent(QResizeEvent *) {
+    if (Theme::I().apple()) {   // toolbar (transport + now-playing display) across the top, sidebar | content below
+        const int tb = 62;
+        side->setCompact(width() < 920);
+        const int sw = side->isCompact() ? 60 : 224;
+        bar->setGeometry(0, 0, width(), tb);
+        side->setGeometry(0, tb, sw, height() - tb);
+        const int cx = sw + 16, cw = width() - cx - 16;
+        if (side->isCompact()) search->setGeometry(cx, tb + 10, cw, 34);
+        else search->setGeometry(10, tb + 12, sw - 20, 34);
+        search->raise();
+        const int ty = tb + 10 + (side->isCompact() ? 40 : 0);
+        tabs->setGeometry(cx, ty, cw, 52);
+        const int top = ty + 52 + 4;
+        tracks->setGeometry(cx - 4, top, cw + 8, height() - top - 6);
+        lyricsView->setGeometry(sw + 10, tb + 10, width() - sw - 20, height() - tb - 18);
+        return;
+    }
     // sidebar | search, page header, list        player bar across the bottom
     const int m = 16, gap = 10, barH = 90;
     side->setCompact(width() < 920);
@@ -690,6 +739,12 @@ void MainWindow::paintEvent(QPaintEvent *) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
     const Palette &c = P();
+    if (Theme::I().apple()) {
+        p.setBrush(c.surface);
+        p.setPen(QPen(QColor(255, 255, 255, 28), 1));
+        p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 12, 12);
+        return;
+    }
     // near-black base (YT Music) with the Noctalia hue showing through, and a soft colour glow
     // pouring down from the top edge (Spotube / YT Music home)
     auto mix = [](const QColor &a, const QColor &b, qreal t) {

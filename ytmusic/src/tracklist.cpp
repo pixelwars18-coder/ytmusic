@@ -596,9 +596,10 @@ void TrackList::rebuildFeed() {
     feedThumbH = cardW;   // square album art, like YT Music
     const int cardH = feedThumbH + 56;
     int y = 0;
-    feedItems.append({3, -1, -1, y, 52, 0, vw});   // mood chips
-    y += 52;
-    if (!feedSecs.isEmpty() && !feedSecs[0].tracks.isEmpty()) {   // big "listen again" banner
+    const int chipH = Theme::I().apple() ? 0 : 52;   // Apple Music has no mood chips
+    feedItems.append({3, -1, -1, y, chipH, 0, vw});
+    y += chipH;
+    if (!Theme::I().apple() && !feedSecs.isEmpty() && !feedSecs[0].tracks.isEmpty()) {   // big "listen again" banner
         const int hh = qBound(190, vw * 11 / 40, 250);
         feedItems.append({4, 0, 0, y, hh, 0, vw});
         y += hh + 14;
@@ -706,6 +707,7 @@ void TrackList::paintFeed(QPainter &p) {
         if (y + it.h < 0) continue;
         auto hv = [&](Kind k) { return hover.kind == k && hover.idx == i; };
 
+        if (it.kind == 3 && it.h == 0) continue;
         if (it.kind == 3) { // mood chips (YT Music)
             const QVector<QRectF> rs = moodRects(it.w);
             p.setFont(fnt(13, QFont::Medium));
@@ -803,21 +805,22 @@ void TrackList::paintFeed(QPainter &p) {
         const bool active = t.vid == nowVid;
         const bool cardHover = hover.idx == i && hover.kind != None;
         const QRectF th(it.x, y, it.w, feedThumbH);
-        drawThumb(p, th, t.vid, 12);
+        drawThumb(p, th, t.vid, Theme::I().apple() ? 8 : 12);
         if (!active && !cardHover) {
             drawDlBadge(p, th, t.vid);
         }
         if (active || cardHover) {
             p.setPen(Qt::NoPen);
-            p.setBrush(QColor(0, 0, 0, cardHover ? 90 : 150));
-            p.drawRoundedRect(th, 12, 12);
+            p.setBrush(QColor(0, 0, 0, cardHover ? (Theme::I().apple() ? 55 : 90) : 150));
+            p.drawRoundedRect(th, Theme::I().apple() ? 8 : 12, Theme::I().apple() ? 8 : 12);
         }
         if (cardHover) {
-            const QRectF pc(th.right() - 14 - 44, th.bottom() - 14 - 44, 44, 44);
+            const bool apl = Theme::I().apple();   // Apple Music: small translucent play disc at the artwork's bottom-left
+            const QRectF pc = apl ? QRectF(th.left() + 10, th.bottom() - 10 - 34, 34, 34) : QRectF(th.right() - 14 - 44, th.bottom() - 14 - 44, 44, 44);
             p.setPen(Qt::NoPen);
-            p.setBrush(c.primary);
+            p.setBrush(apl ? QColor(255, 255, 255, 215) : c.primary);
             p.drawEllipse(pc);
-            Icons::paint(p, QRectF(pc.center().x() - 9, pc.center().y() - 9, 18, 18), QStringLiteral("play"), c.onPrimary);
+            Icons::paint(p, QRectF(pc.center().x() - 8, pc.center().y() - 8, 16, 16), QStringLiteral("play"), apl ? c.primary : c.onPrimary);
             const bool liked = core->isLiked(t.vid);
             const QRectF bq(it.x + it.w - 8 - 30, y + 8, 30, 30), bl(bq.left() - 36, y + 8, 30, 30);
             p.setPen(Qt::NoPen);

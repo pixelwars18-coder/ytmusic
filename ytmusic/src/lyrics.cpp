@@ -264,7 +264,10 @@ void LyricsView::paintEvent(QPaintEvent *) {
     p.setRenderHint(QPainter::SmoothPixmapTransform);
     const Palette &c = P();
     p.setPen(Qt::NoPen);
-    {   // deep base with a colour wash from the top, so it matches the window glow instead of being a flat slab
+    if (Theme::I().apple()) {
+        p.setBrush(c.surface);
+        p.drawRoundedRect(rect(), 10, 10);
+    } else {   // deep base with a colour wash from the top, so it matches the window glow instead of being a flat slab
         QColor base = QColor::fromRgbF(c.surface.redF() * 0.58, c.surface.greenF() * 0.58, c.surface.blueF() * 0.58);
         p.setBrush(base);
         p.drawRoundedRect(rect(), 22, 22);
