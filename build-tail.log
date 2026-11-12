@@ -1,0 +1,88 @@
+
+Welcome to Gradle 8.9!
+
+Here are the highlights of this release:
+ - Enhanced Error and Warning Messages
+ - IDE Integration Improvements
+ - Daemon JVM Information
+
+For more details see https://docs.gradle.org/8.9/release-notes.html
+
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.9/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:preBuild UP-TO-DATE
+> Task :core:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :app:mergeReleaseJniLibFolders
+> Task :app:mergeReleaseArtProfile
+> Task :app:buildKotlinToolingMetadata
+> Task :core:processResources NO-SOURCE
+> Task :app:expandReleaseL8ArtProfileWildcards
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:checkReleaseDuplicateClasses
+> Task :app:generateReleaseResValues
+> Task :app:checkReleaseAarMetadata
+> Task :app:mapReleaseSourceSetPaths
+> Task :app:generateReleaseResources
+> Task :core:compileKotlin
+> Task :core:compileJava NO-SOURCE
+> Task :core:classes UP-TO-DATE
+> Task :app:packageReleaseResources
+> Task :core:jar
+> Task :app:parseReleaseLocalResources
+> Task :app:mergeReleaseNativeLibs NO-SOURCE
+> Task :app:stripReleaseDebugSymbols NO-SOURCE
+> Task :app:extractReleaseNativeSymbolTables NO-SOURCE
+> Task :app:mergeReleaseNativeDebugMetadata NO-SOURCE
+> Task :app:createReleaseCompatibleScreenManifests
+> Task :app:extractDeepLinksRelease
+> Task :app:mergeReleaseResources
+> Task :app:processReleaseMainManifest
+> Task :app:processReleaseManifest
+> Task :app:javaPreCompileRelease
+> Task :app:extractProguardFiles
+> Task :app:mergeReleaseStartupProfile
+> Task :app:mergeReleaseShaders
+> Task :app:compileReleaseShaders NO-SOURCE
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :app:mergeReleaseAssets
+> Task :app:compressReleaseAssets
+> Task :app:extractReleaseVersionControlInfo
+> Task :app:processApplicationManifestReleaseForBundle
+> Task :app:collectReleaseDependencies
+> Task :app:sdkReleaseDependencyData
+> Task :app:validateSigningRelease
+> Task :app:writeReleaseAppMetadata
+> Task :app:writeReleaseSigningConfigVersions
+> Task :app:processReleaseManifestForPackage
+> Task :app:processReleaseResources
+> Task :app:bundleReleaseResources
+
+> Task :app:compileReleaseKotlin
+w: file:///home/runner/work/ytmusic/ytmusic/ytmusic-android/app/src/main/java/dev/ytmusic/DownloadService.kt:32:34 'fun stopForeground(p0: Boolean): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/ytmusic/ytmusic/ytmusic-android/app/src/main/java/dev/ytmusic/MainActivity.kt:87:38 'var systemUiVisibility: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/ytmusic/ytmusic/ytmusic-android/app/src/main/java/dev/ytmusic/MainActivity.kt:87:65 'static field SYSTEM_UI_FLAG_LIGHT_STATUS_BAR: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/ytmusic/ytmusic/ytmusic-android/app/src/main/java/dev/ytmusic/MainActivity.kt:88:71 'static field SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/ytmusic/ytmusic/ytmusic-android/app/src/main/java/dev/ytmusic/MainActivity.kt:89:30 'var systemUiVisibility: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/ytmusic/ytmusic/ytmusic-android/app/src/main/java/dev/ytmusic/MainActivity.kt:269:18 This declaration overrides a deprecated member but is not marked as deprecated itself. Please add the '@Deprecated' annotation or suppress the diagnostic.
+w: file:///home/runner/work/ytmusic/ytmusic/ytmusic-android/app/src/main/java/dev/ytmusic/PlaybackService.kt:65:54 'constructor(): FragmentedMp4Extractor' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/ytmusic/ytmusic/ytmusic-android/app/src/main/java/dev/ytmusic/PlaybackService.kt:65:80 'constructor(): Mp4Extractor' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/ytmusic/ytmusic/ytmusic-android/app/src/main/java/dev/ytmusic/PlaybackService.kt:65:96 'constructor(): MatroskaExtractor' is deprecated. Deprecated in Java.
+
+> Task :app:compileReleaseJavaWithJavac NO-SOURCE
+> Task :app:mergeReleaseGeneratedProguardFiles
+> Task :app:processReleaseJavaRes
+> Task :app:expandReleaseArtProfileWildcards
+> Task :app:mergeReleaseJavaResource
+> Task :app:minifyReleaseWithR8
+> Task :app:l8DexDesugarLibRelease
+> Task :app:compileReleaseArtProfile
+> Task :app:shrinkReleaseRes
+> Task :app:optimizeReleaseResources
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:assembleRelease
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run-1794445986225.json
+
+BUILD SUCCESSFUL in 2m 42s
+46 actionable tasks: 46 executed
