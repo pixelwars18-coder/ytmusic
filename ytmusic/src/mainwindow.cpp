@@ -450,10 +450,10 @@ QVector<TabsBar::Item> TabsBar::items() const {
     }
     const bool back = !selecting && (detail || savedOpen);
     const bool modes = !selecting && tab == Tab::Results && !detail;
-    const qreal titleW = QFontMetrics(fnt(20, QFont::Bold)).horizontalAdvance(title) + 4;
+    const qreal titleW = QFontMetrics(fnt(Theme::I().apple() ? 26 : 20, QFont::Bold)).horizontalAdvance(title) + 4;
     const int wSongs = pillWidth(QStringLiteral("Songs"), {}), wPl = pillWidth(QStringLiteral("Playlists"), {});
     const qreal modesW = modes ? wSongs + 8 + wPl + 14 : 0;
-    const qreal leftNeed = (back ? 38 : 0) + qMin<qreal>(titleW, 200) + modesW;
+    const qreal leftNeed = (back ? 38 : 0) + qMin<qreal>(titleW, Theme::I().apple() ? 320 : 200) + modesW;
 
     // not enough room beside the title: the action pills shrink to icon-only
     qreal need = 0;

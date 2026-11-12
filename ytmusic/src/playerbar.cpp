@@ -8,7 +8,7 @@ using namespace UI;
 
 PlayerBar::PlayerBar(Core *c, QWidget *parent) : QWidget(parent), core(c) {
     setMouseTracking(true);
-    setFixedHeight(90);
+    setFixedHeight(Theme::I().apple() ? 62 : 90);
     setFocusPolicy(Qt::NoFocus);
     // artwork is decoded in the background: repaint when it lands
     connect(&Thumbs::I(), &Thumbs::ready, this, qOverload<>(&QWidget::update));
