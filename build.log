@@ -1,0 +1,17 @@
+ninja: Entering directory `build'
+[1/16] Automatic MOC for target ytmusic
+[2/16] Building CXX object CMakeFiles/ytmusic.dir/src/icons.cpp.o
+[3/16] Building CXX object CMakeFiles/ytmusic.dir/src/theme.cpp.o
+[4/16] Building CXX object CMakeFiles/ytmusic.dir/src/main.cpp.o
+[5/16] Building CXX object CMakeFiles/ytmusic.dir/src/thumbs.cpp.o
+[6/16] Building CXX object CMakeFiles/ytmusic.dir/src/mpris.cpp.o
+[7/16] Building CXX object CMakeFiles/ytmusic.dir/ytmusic_autogen/mocs_compilation.cpp.o
+[8/16] Building CXX object CMakeFiles/ytmusic.dir/src/ui_common.cpp.o
+[9/16] Building CXX object CMakeFiles/ytmusic.dir/src/core.cpp.o
+[10/16] Building CXX object CMakeFiles/ytmusic.dir/src/tracklist.cpp.o
+[11/16] Building CXX object CMakeFiles/ytmusic.dir/src/playerbar.cpp.o
+[12/16] Building CXX object CMakeFiles/ytmusic.dir/src/downloads.cpp.o
+[13/16] Building CXX object CMakeFiles/ytmusic.dir/src/lyrics.cpp.o
+[14/16] Building CXX object CMakeFiles/ytmusic.dir/src/mainwindow.cpp.o
+[15/16] Building CXX object CMakeFiles/ytmusic.dir/src/settings.cpp.o
+[16/16] Linking CXX executable ytmusic
