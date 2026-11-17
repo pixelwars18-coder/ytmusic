@@ -4,6 +4,7 @@
 #include <QTimer>
 #include <QWidget>
 
+// The now-playing screen: large artwork, what plays next, and lyrics.
 // Lyrics from LRCLIB (lrclib.net): free, no account. Time-synced lines when available.
 class LyricsView : public QWidget {
     Q_OBJECT
@@ -27,6 +28,11 @@ private:
     void layoutLines();
     int currentIndex() const;
     QString cachePath(const QString &vid) const;
+    // Wide enough: artwork, title and "up next" on the left, lyrics on the right. Otherwise lyrics only.
+    bool split() const { return width() >= 640; }
+    qreal leftW() const { return split() ? qBound<qreal>(250, width() * 0.40, 400) : 0; }
+    qreal lyrX() const { return split() ? leftW() + 36 : 40; }
+    qreal lyrW() const { return qMax<qreal>(120, width() - lyrX() - 40); }
 
     Core *core;
     QString vid, message, plain;

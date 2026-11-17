@@ -48,6 +48,12 @@ Core::Core(QObject *parent) : QObject(parent) {
     connect(&mpvIdleTimer, &QTimer::timeout, this, &Core::checkMpvIdle);
     mpvIdleTimer.start();
     loaded = true;
+    // A session usually starts by resuming the song that was playing: have its stream ready
+    // so the first press of Play starts at once. (Not when starting hidden in the tray.)
+    if (!startHidden)
+        QTimer::singleShot(1500, this, [this] {
+            if (const Track *t = nowPlaying(); t && idle) prefetch(t->vid);
+        });
 }
 
 Core::~Core() { shutdown(); }
@@ -454,6 +460,8 @@ void Core::prefetch(const QString &vid) {
     if (speculative >= 2) return;   // don't pile up yt-dlp processes while the mouse sweeps across a list
     ++speculative;
     resolveUrl(vid, true);
+    // A click is likely: have mpv running by then too (it is shut down again if nothing gets played).
+    if (memoryMode != 0) ensureMpv();
 }
 
 void Core::resolveUrl(const QString &vid, bool spec) {
@@ -576,6 +584,22 @@ void Core::search(const QString &qIn, bool more) {
         ytProc->disconnect(this);
         ytProc->kill();
         ytProc->deleteLater();
+        ytProc = nullptr;
+    }
+    const QString cacheKey = searchKey(q, plMode);
+    if (!more) {
+        const auto hit = searchCache.constFind(cacheKey);
+        if (hit != searchCache.constEnd() && QDateTime::currentSecsSinceEpoch() - hit->at < 15 * 60) {
+            results = hit->tracks;
+            playlistResults = hit->playlists;
+            searchLimit = qMax(pageSize, hit->limit);
+            searching = false;
+            status.clear();
+            emit resultsChanged();
+            emit searchStateChanged();
+            if (!plMode && !results.isEmpty()) prefetch(results.first().vid);
+            return;
+        }
     }
     searching = true;
     emit searchStateChanged();
@@ -630,14 +654,22 @@ void Core::search(const QString &qIn, bool more) {
             emit searchStateChanged();
         }
     });
-    connect(p, &QProcess::finished, this, [this, p, buf, parse] {
+    connect(p, &QProcess::finished, this, [this, p, buf, parse, cacheKey, plMode] {
         if (p != ytProc) return;
         buf->append(p->readAllStandardOutput());
         parse(true);
         searching = false;
-        if (hasResults()) status.clear();
-        if (searchMode == SearchMode::Songs && !results.isEmpty() && searchLimit == pageSize) prefetch(results.first().vid);
-        else {
+        if (hasResults()) {
+            status.clear();
+            if (searchCache.size() > 40) searchCache.clear();
+            searchCache.insert(cacheKey, {plMode ? QVector<Track>() : results, plMode ? playlistResults : QVector<PlaylistRef>(),
+                                          searchLimit, QDateTime::currentSecsSinceEpoch()});
+        }
+        if (searchMode == SearchMode::Songs && !results.isEmpty() && searchLimit == pageSize) {
+            // the top results are what gets clicked most: resolve their streams now
+            prefetch(results.first().vid);
+            if (results.size() > 1) prefetch(results.at(1).vid);
+        } else if (!hasResults()) {
             const QString e = firstLine(p->readAllStandardError());
             status = e.isEmpty() ? QStringLiteral("No results") : e;
         }
@@ -1297,14 +1329,29 @@ void Core::refreshFeed() {
     QSet<QString> fetched;
     QVector<Track> toFetch = seeds;
     for (const Track &t : std::as_const(because)) if (!seeds.contains(t) ) toFetch.append(t);
-    job->pending = 1 + toFetch.size();
+    // At most three yt-dlp processes at a time: starting all eight or nine together pegs every core for
+    // seconds, right when the window is opening or the first song is being resolved.
+    struct Fetch { QString url; int limit; std::function<void(const Track &)> onTrack; };
+    auto fetches = std::make_shared<QVector<Fetch>>();
     for (const Track &seed : std::as_const(toFetch)) {
-        const QString url = QStringLiteral("https://www.youtube.com/watch?v=%1&list=RD%1").arg(seed.vid);
-        runPlaylistProc(this, url, 26,
-                        [job, seed](const Track &t) { if (t.vid != seed.vid && t.duration >= 30 && t.duration <= 1500) job->mixes[seed.vid].append(t); },
-                        [finish](const QString &) { finish(); });
+        fetches->append({QStringLiteral("https://www.youtube.com/watch?v=%1&list=RD%1").arg(seed.vid), 26,
+                         [job, seed](const Track &t) { if (t.vid != seed.vid && t.duration >= 30 && t.duration <= 1500) job->mixes[seed.vid].append(t); }});
     }
-    runPlaylistProc(this, kCharts, 30, [job](const Track &t) { job->charts.append(t); }, [finish](const QString &) { finish(); });
+    fetches->append({kCharts, 30, [job](const Track &t) { job->charts.append(t); }});
+    job->pending = int(fetches->size());
+
+    auto startNext = std::make_shared<std::function<void()>>();
+    const std::weak_ptr<std::function<void()>> weakNext = startNext;
+    *startNext = [this, fetches, finish, weakNext]() {
+        if (fetches->isEmpty()) return;
+        const Fetch f = fetches->takeFirst();
+        const auto next = weakNext.lock();
+        runPlaylistProc(this, f.url, f.limit, f.onTrack, [finish, next](const QString &) {
+            finish();
+            if (next) (*next)();
+        });
+    };
+    for (int i = 0; i < 3; ++i) (*startNext)();
 }
 
 

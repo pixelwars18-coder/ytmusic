@@ -32,7 +32,41 @@ private:
     int hover = 0; // 1 clear, 2 go
 };
 
-// Tabs on the left, context actions + hide button on the right.
+// Left rail: brand, the five pages, your playlists, and Now playing / Settings at the bottom.
+// Shrinks to an icon-only strip when the window is narrow.
+class SideBar : public QWidget {
+    Q_OBJECT
+public:
+    SideBar(Core *core, QWidget *parent = nullptr);
+    Tab tab = Tab::Home;
+    bool nowPlayingOpen = false;
+    void setTab(Tab t);
+    void setCompact(bool on);
+    bool isCompact() const { return compact; }
+signals:
+    void tabChanged(Tab t);
+    void playlistRequested(const QString &id);
+    void actionTriggered(int id);   // same ids as the header actions: 7 now playing, 8 settings, 17 new playlist
+    void dragRequested();
+protected:
+    void paintEvent(QPaintEvent *) override;
+    void mouseMoveEvent(QMouseEvent *) override;
+    void mousePressEvent(QMouseEvent *) override;
+    void leaveEvent(QEvent *) override;
+    void wheelEvent(QWheelEvent *) override;
+private:
+    enum Kind { Nav, Playlist, Action, Caption, NewPlaylist };
+    struct Item { QRectF r; Kind kind; int id; QString label, icon, pid, badge; bool active; };
+    QVector<Item> items() const;
+    QRectF playlistArea() const;
+    int playlistContentH() const;
+    Core *core;
+    bool compact = false;
+    int hover = -1;
+    int plScroll = 0;
+};
+
+// Page title (or "back" + playlist name) on the left, context actions + hide button on the right.
 class TabsBar : public QWidget {
     Q_OBJECT
 public:
@@ -65,6 +99,7 @@ public:
     void toggleVisible();
     void showWindow();
     void setTab(Tab t);
+    void toggleNowPlaying();
     QPixmap snapshot();
     void showToast(const QString &text);
 protected:
@@ -93,6 +128,7 @@ private:
 
     Core *core;
     SearchBox *search;
+    SideBar *side;
     TabsBar *tabs;
     TrackList *tracks;
     LyricsView *lyricsView;

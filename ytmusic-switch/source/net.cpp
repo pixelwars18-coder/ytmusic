@@ -1,11 +1,61 @@
 #include "net.hpp"
 #include <curl/curl.h>
+#include <algorithm>
 #include <cstring>
+#include <mutex>
+#include <vector>
 
 namespace Net {
 
+// Idle handles, most recently used last. A handle is only ever used by one thread at a time; whoever
+// takes one gets the connections its previous user left open (same hosts over and over: youtube.com,
+// i.ytimg.com, one googlevideo.com server per song).
+static std::mutex poolMu;
+static std::vector<CURL *> pool;
+static int poolMax = 0;
+
+static CURL *acquire() {
+    {
+        std::lock_guard<std::mutex> l(poolMu);
+        if (!pool.empty()) {
+            CURL *c = pool.back();
+            pool.pop_back();
+            return c;
+        }
+    }
+    return curl_easy_init();
+}
+
+static void release(CURL *c) {
+    {
+        std::lock_guard<std::mutex> l(poolMu);
+        if (int(pool.size()) < poolMax) {
+            curl_easy_reset(c);   // forgets the options (and their pointers into the caller's stack), keeps the connections
+            pool.push_back(c);
+            return;
+        }
+    }
+    curl_easy_cleanup(c);
+}
+
+void setKeepAlive(int maxIdle) {
+    std::vector<CURL *> drop;
+    {
+        std::lock_guard<std::mutex> l(poolMu);
+        poolMax = std::max(0, maxIdle);
+        while (int(pool.size()) > poolMax) {
+            drop.push_back(pool.back());
+            pool.pop_back();
+        }
+    }
+    for (CURL *c : drop) curl_easy_cleanup(c);
+}
+
 void init() { curl_global_init(CURL_GLOBAL_DEFAULT); }
-void cleanup() { curl_global_cleanup(); }
+void cleanup() {
+    setKeepAlive(0);
+    curl_global_cleanup();
+}
 
 static size_t toString(char *p, size_t s, size_t n, void *ud) {
     static_cast<std::string *>(ud)->append(p, s * n);
@@ -26,6 +76,7 @@ static void common(CURL *c, const std::string &url, long timeoutSec) {
     curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 10L);
     if (timeoutSec > 0) curl_easy_setopt(c, CURLOPT_TIMEOUT, timeoutSec);
     curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(c, CURLOPT_TCP_KEEPALIVE, 1L);
 #ifdef __SWITCH__
     curl_easy_setopt(c, CURLOPT_BUFFERSIZE, 128 * 1024L);
 #endif
@@ -33,7 +84,7 @@ static void common(CURL *c, const std::string &url, long timeoutSec) {
 
 static Response perform(const std::string &url, const std::string *body, const Headers &h, long timeoutSec) {
     Response r;
-    CURL *c = curl_easy_init();
+    CURL *c = acquire();
     if (!c) { r.error = "curl init failed"; return r; }
     common(c, url, timeoutSec);
     curl_slist *hl = mkHeaders(h);
@@ -48,8 +99,8 @@ static Response perform(const std::string &url, const std::string *body, const H
     const CURLcode rc = curl_easy_perform(c);
     if (rc != CURLE_OK) r.error = curl_easy_strerror(rc);
     curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &r.status);
+    release(c);
     curl_slist_free_all(hl);
-    curl_easy_cleanup(c);
     return r;
 }
 
@@ -74,7 +125,7 @@ static int progressCb(void *ud, curl_off_t, curl_off_t, curl_off_t, curl_off_t) 
 
 long stream(const std::string &url, const std::function<bool(const char *, size_t)> &sink, const std::atomic<bool> *cancel,
             std::string *err, const Headers &h) {
-    CURL *c = curl_easy_init();
+    CURL *c = acquire();
     if (!c) { if (err) *err = "curl init failed"; return 0; }
     common(c, url, 0);
     curl_easy_setopt(c, CURLOPT_ACCEPT_ENCODING, nullptr);   // media: no gzip
@@ -95,8 +146,8 @@ long stream(const std::string &url, const std::function<bool(const char *, size_
         if (err) *err = curl_easy_strerror(rc);
         if (rc != CURLE_WRITE_ERROR && rc != CURLE_ABORTED_BY_CALLBACK) status = 0;
     }
+    release(c);
     curl_slist_free_all(hl);
-    curl_easy_cleanup(c);
     return status;
 }
 

@@ -3,6 +3,9 @@ on:
   push:
     branches: [main]
     paths: ['ytmusic-android/**', '.github/workflows/android.yml']
+  # Pull requests are only compiled (debug key, no release): nothing reaches the devices until main.
+  pull_request:
+    paths: ['ytmusic-android/**', '.github/workflows/android.yml']
   workflow_dispatch:
 permissions:
   contents: write
@@ -16,6 +19,8 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: ''
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
@@ -24,7 +29,7 @@ jobs:
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
+          if [ -n "$KEYSTORE_BASE64" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > ytmusic-android/ytmusic.keystore
             echo "signed=true" >> "$GITHUB_OUTPUT"
           else
@@ -33,7 +38,22 @@ jobs:
           fi
       - name: Build
         working-directory: ytmusic-android
-        run: gradle --no-daemon :app:assembleRelease
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:assembleRelease 2>&1 | tee /tmp/android-build.log
+      - name: Publish result to the android-ci branch
+        if: always()
+        shell: bash
+        run: |
+          sha=$(git -C "$GITHUB_WORKSPACE" rev-parse --short HEAD)
+          mkdir -p /tmp/out && cd /tmp/out
+          grep -n -B2 -A12 '^e: \|What went wrong\|warning:.*unused\|BUILD ' /tmp/android-build.log > build-summary.log 2>/dev/null || true
+          tail -150 /tmp/android-build.log > build-tail.log 2>/dev/null || true
+          echo "${sha} ${{ job.status }} ${{ github.event_name }} ${{ github.head_ref || github.ref_name }}" > status.txt
+          git init -q && git checkout -q -b android-ci
+          git add -A && git -c user.name=ci -c user.email=ci@localhost commit -q -m "CI ${sha}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" android-ci
       - name: Package
         id: pkg
         run: |
@@ -54,7 +74,7 @@ jobs:
           name: ytmusic-apk
           path: out/*
       - name: Publish GitHub release (the app's updater reads releases/latest)
-        if: steps.key.outputs.signed == 'true'
+        if: steps.key.outputs.signed == 'true' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

@@ -1,4 +1,5 @@
 #include "app.hpp"
+#include "net.hpp"
 #include <algorithm>
 #include <cmath>
 #include <random>
@@ -25,6 +26,7 @@ bool fresh(const YT::Stream &s) { return s.ok() && (s.expires == 0 || s.expires 
 bool App::init(SDL_Renderer *r, const std::vector<Gfx::FontBlob> &fonts) {
     if (!g.init(r, fonts)) return false;
     thumbs.start(r);
+    Net::setKeepAlive(4);   // reuse connections: no TLS handshake per cover / lookup / audio chunk
     mkdirs(Paths::root());
     lib.load();
     setDarkTheme(lib.dark);
@@ -85,9 +87,41 @@ const std::vector<Track> *App::currentTracks() {
     case View::Queue: return &lib.queue;
     case View::Liked: return &lib.liked;
     case View::Playlists: if (Playlist *p = lib.find(openPlaylist)) return &p->tracks; return nullptr;
-    case View::Downloads: tmpList = dl.list(); return &tmpList;
+    case View::Downloads:
+        if (tmpListFrame != frameCount) { tmpList = dl.list(); tmpListFrame = frameCount; }   // once per frame, not per caller
+        return &tmpList;
     default: return nullptr;
     }
+}
+
+// 0: small or composed list, rebuilt every time. Otherwise a hash of what a song list shows.
+uint64_t App::rowsSignature() {
+    if (view == View::Settings) return 0;
+    if (view == View::Search && results.empty()) return 0;
+    if (view == View::Playlists && openPlaylist.empty()) return 0;
+    uint64_t h = 1469598103934665603ull;   // FNV-1a
+    auto mix = [&h](const void *p, size_t n) {
+        const unsigned char *b = static_cast<const unsigned char *>(p);
+        for (size_t i = 0; i < n; ++i) { h ^= b[i]; h *= 1099511628211ull; }
+    };
+    const int v = int(view);
+    mix(&v, sizeof v);
+    mix(openPlaylist.data(), openPlaylist.size());
+    if (const std::vector<Track> *l = currentTracks()) {
+        const size_t n = l->size();
+        mix(&n, sizeof n);
+        for (const Track &t : *l) { mix(t.vid.data(), t.vid.size()); mix("/", 1); }
+    }
+    return h ? h : 1;
+}
+
+std::shared_ptr<const App::Rows> App::rowsShared() {
+    const uint64_t sig = rowsSignature();
+    if (!rowCache || sig == 0 || sig != rowSig) {
+        rowCache = std::make_shared<const Rows>(rows());
+        rowSig = sig;
+    }
+    return rowCache;
 }
 
 std::vector<App::Row> App::rows() {
@@ -172,6 +206,7 @@ void App::runSearch(const std::string &q0) {
             results = pg.tracks;
             continuation = pg.continuation;
             searchStatus = results.empty() ? (pg.error.empty() ? "No results" : pg.error) : "";
+            if (!results.empty()) prefetch(results.front().vid);   // the first result is what gets played most
         });
     });
 }
@@ -267,14 +302,11 @@ void App::prev() {
     else playIndex(lib.current - 1);
 }
 
-void App::preloadNext() {
-    if (remote) return;
-    if (lib.queue.empty() || !preloading.empty()) return;
-    nextPick = pickNext(true);
-    if (nextPick < 0 || nextPick >= int(lib.queue.size())) return;
-    const std::string vid = lib.queue[size_t(nextPick)].vid;
+bool App::prefetch(const std::string &vid) {
+    if (remote || vid.empty()) return true;            // the background service does its own lookups
     auto it = urlCache.find(vid);
-    if ((it != urlCache.end() && fresh(it->second)) || dl.isDownloaded(vid)) return;
+    if ((it != urlCache.end() && fresh(it->second)) || dl.isDownloaded(vid)) return true;
+    if (!preloading.empty()) return preloading == vid;  // one lookup at a time
     preloading = vid;
     async([this, vid] {
         YT::Stream s = YT::resolve(vid);
@@ -283,6 +315,15 @@ void App::preloadNext() {
             if (s.ok()) urlCache[vid] = s;
         });
     });
+    return true;
+}
+
+void App::preloadNext() {
+    if (remote) return;
+    if (lib.queue.empty() || !preloading.empty()) return;
+    nextPick = pickNext(true);
+    if (nextPick < 0 || nextPick >= int(lib.queue.size())) return;
+    prefetch(lib.queue[size_t(nextPick)].vid);
 }
 
 void App::enqueue(const Track &t, bool asNext) {
@@ -557,6 +598,7 @@ void App::toggleBackground() {
 
 // ------------------------------------------------------------------ frame
 bool App::frame(const Input &in) {
+    ++frameCount;
     {   // results from background jobs
         std::vector<std::function<void()>> todo;
         { std::lock_guard<std::mutex> l(postMu); todo.swap(posted); }
@@ -603,10 +645,10 @@ bool App::frame(const Input &in) {
     saveT += in.dt;
     if (saveT > 5) { saveT = 0; lib.volume = pVol(); lib.saveIfDirty(); }
 
-    auto rs = rows();
+    std::shared_ptr<const Rows> rs = rowsShared();
     const int v = int(view);
     int &s = sel[v];
-    s = std::clamp(s, 0, std::max(0, int(rs.size()) - 1));
+    s = std::clamp(s, 0, std::max(0, int(rs->size()) - 1));
     const bool listView = view == View::Settings;
 
     // ---------------- menu overlay
@@ -653,11 +695,11 @@ bool App::frame(const Input &in) {
         if (step == B_UP || (in.down & (B_A | B_B))) focus = 0;
     } else if (listView) {
         if (step == B_UP) s = std::max(0, s - 1);
-        if (step == B_DOWN) { if (s + 1 >= int(rs.size())) { focus = 1; tabSel = v; } else ++s; }
+        if (step == B_DOWN) { if (s + 1 >= int(rs->size())) { focus = 1; tabSel = v; } else ++s; }
         ensureVisible();
     } else {
         if (step == B_LEFT) s = std::max(0, s - 1);
-        if (step == B_RIGHT) s = std::min(std::max(0, int(rs.size()) - 1), s + 1);
+        if (step == B_RIGHT) s = std::min(std::max(0, int(rs->size()) - 1), s + 1);
         if (step == B_DOWN) { focus = 1; tabSel = v; }
         if (step & (B_LEFT | B_RIGHT)) ensureVisible();
     }
@@ -693,11 +735,11 @@ bool App::frame(const Input &in) {
         if (view == View::Playlists && !openPlaylist.empty()) { openPlaylist.clear(); sel[v] = playlistsSel; ensureVisible(); }
         else if (view == View::Search && !results.empty()) { results.clear(); searchStatus.clear(); ++searchGen; searching = false; }
     }
-    rs = rows();
-    s = std::clamp(s, 0, std::max(0, int(rs.size()) - 1));
+    rs = rowsShared();
+    s = std::clamp(s, 0, std::max(0, int(rs->size()) - 1));
     if (focusAtStart == 0) {
-        if (!rs.empty()) {
-            const Row &r = rs[size_t(s)];
+        if (!rs->empty()) {
+            const Row &r = (*rs)[size_t(s)];
             if (in.down & B_A) activate(r);
             else if ((in.down & B_X) && (r.kind == Row::Song)) { lib.toggleLike(r.t); toast(lib.isLiked(r.t.vid) ? "Added to liked" : "Removed from liked"); }
             else if (in.down & B_MINUS) openMenu(&r);
@@ -710,8 +752,8 @@ bool App::frame(const Input &in) {
         const bool inRow = listView ? (touchStartY > kListY && touchStartY < kListY + kListH) : (touchStartY > kTileY - 30 && touchStartY < kTileY + kTile + 40);
         if (inRow && (listView ? std::fabs(in.ty - touchStartY) : std::fabs(in.tx - touchStartX)) > 14) dragging = true;
         if (dragging) {
-            if (listView) scroll[v] = std::clamp(scroll[v] - (in.ty - touchLastY), 0.f, std::max(0.f, rs.size() * kRowH - kListH));
-            else scroll[v] = std::clamp(scroll[v] - (in.tx - touchLastX), 0.f, std::max(0.f, rs.size() * (kTile + kGap) - (W - 2 * kTileX0)));
+            if (listView) scroll[v] = std::clamp(scroll[v] - (in.ty - touchLastY), 0.f, std::max(0.f, rs->size() * kRowH - kListH));
+            else scroll[v] = std::clamp(scroll[v] - (in.tx - touchLastX), 0.f, std::max(0.f, rs->size() * (kTile + kGap) - (W - 2 * kTileX0)));
             scrollShown[v] = scroll[v];
             touchLastX = in.tx;
             touchLastY = in.ty;
@@ -725,10 +767,10 @@ bool App::frame(const Input &in) {
         if (hitTab >= 0) { view = View(hitTab); tabSel = hitTab; focus = 0; }
         else if (listView && y > kListY && y < kListY + kListH && x > kListX && x < kListX + kListW) {
             const int i = int((y - kListY + scroll[v]) / kRowH);
-            if (i >= 0 && i < int(rs.size())) { focus = 0; if (i == s) activate(rs[size_t(i)]); else s = i; }
+            if (i >= 0 && i < int(rs->size())) { focus = 0; if (i == s) activate((*rs)[size_t(i)]); else s = i; }
         } else if (!listView && y > kTileY && y < kTileY + kTile) {
             const int i = int((x - kTileX0 + scrollShown[v]) / (kTile + kGap));
-            if (i >= 0 && i < int(rs.size())) { focus = 0; if (i == s) activate(rs[size_t(i)]); else s = i; }
+            if (i >= 0 && i < int(rs->size())) { focus = 0; if (i == s) activate((*rs)[size_t(i)]); else s = i; }
         } else if (y > kHintY) {
             if (x < 520) pToggle();
             else if (x > W - 170) askSearch();
@@ -738,6 +780,14 @@ bool App::frame(const Input &in) {
 
     // infinite scroll for search results
     if (view == View::Search && !results.empty() && s >= int(results.size()) - 5) loadMore();
+
+    // resting on a song for a moment: look its stream up now, so that A starts it without the wait
+    {
+        const bool onSong = focus == 0 && menu.empty() && !rs->empty() && s >= 0 && s < int(rs->size()) && (*rs)[size_t(s)].kind == Row::Song;
+        const std::string cur = onSong ? (*rs)[size_t(s)].t.vid : std::string();
+        if (cur != dwellVid) { dwellVid = cur; dwellT = 0; dwellDone = false; }
+        else if (!cur.empty() && !dwellDone && (dwellT += in.dt) > 0.4f) dwellDone = prefetch(cur);
+    }
 
     // smooth horizontal scrolling
     for (int i = 0; i < int(View::Count); ++i) {
@@ -806,7 +856,8 @@ void App::drawTopBar() {
 // The row of square tiles (songs, playlists or recent searches)
 void App::drawTiles() {
     const Theme &t = TH();
-    auto rs = rows();
+    const std::shared_ptr<const Rows> rsHold = rowsShared();
+    const Rows &rs = *rsHold;
     const int v = int(view);
     if (rs.empty()) {
         std::string msg;
@@ -907,7 +958,8 @@ void App::drawTiles() {
 // Settings: a console-style list of options
 void App::drawList() {
     const Theme &t = TH();
-    auto rs = rows();
+    const std::shared_ptr<const Rows> rsHold = rowsShared();
+    const Rows &rs = *rsHold;
     const int v = int(view);
     g.fillRound(kListX - 10, kListY - 10, kListW + 20, kListH + 20, 26, t.panel);
     g.clip(kListX - 10, kListY - 6, kListW + 20, kListH + 12);
@@ -991,7 +1043,8 @@ void App::drawHints() {
     hint("+", st == Player::Playing ? "Pause" : "Resume");
     hint("Y", "Search");
     hint("\xE2\x88\x92", "Options");
-    auto rs = rows();
+    const std::shared_ptr<const Rows> rsHold = rowsShared();
+    const Rows &rs = *rsHold;
     const int s = sel[int(view)];
     if (!rs.empty() && s < int(rs.size())) {
         const Row &r = rs[size_t(s)];

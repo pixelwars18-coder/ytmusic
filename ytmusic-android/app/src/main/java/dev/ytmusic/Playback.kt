@@ -64,7 +64,10 @@ object Playback {
         if (c.mediaItemCount == 0 && Store.queue.isNotEmpty()) {
             val idx = Store.queueIndex.coerceIn(0, Store.queue.size - 1)
             c.setMediaItems(Store.queue.map(::item), idx, Store.queuePosMs)
-            // not prepared: nothing touches the network until you press play
+            // not prepared: the player itself stays idle until you press play. Only the stream lookup for the
+            // song you left on is done ahead (once start-up has settled), so that first press starts at once.
+            val resume = Store.queue[idx]
+            App.main.postDelayed({ if (ctrl?.playbackState == Player.STATE_IDLE) Prefetch.warm(listOf(resume), 1) }, 2500)
         }
     }
 

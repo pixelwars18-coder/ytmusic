@@ -233,9 +233,16 @@ std::string Gfx::pickFont(const std::string &s, int size, bool bold, int &which)
 
 int Gfx::measure(const std::string &s0, int size0, bool bold) {
     const int size = std::max(6, int(std::lround(size0 * sc)));   // fonts are rasterised at device resolution
+    char mk[32];
+    snprintf(mk, sizeof mk, "|%d|%d", size, int(bold));
+    const std::string req = s0 + mk;
+    const auto hit = measured.find(req);
+    if (hit != measured.end()) return int(std::lround(hit->second / sc));
     int w = 0, which = 0;
     const std::string s = pickFont(s0, size, bold, which);
     if (TTF_Font *f = font(size, bold, which)) TTF_SizeUTF8(f, s.c_str(), &w, nullptr);
+    if (measured.size() > 2000) measured.clear();
+    measured[req] = w;
     return int(std::lround(w / sc));
 }
 
@@ -245,22 +252,36 @@ int Gfx::text(const std::string &s0, float x, float y, int size0, SDL_Color c, i
     x *= sc;
     y *= sc;
     maxW = int(maxW * sc);
-    int which = 0;
-    const std::string s1 = pickFont(s0, size, bold, which);
-    TTF_Font *f = font(size, bold, which);
-    if (!f || s1.empty()) return 0;
-    std::string s = maxW > 0 ? elide(f, s1, maxW) : s1;
-    char key[64];
-    snprintf(key, sizeof key, "|%d|%d|%d|%02x%02x%02x", size, int(bold), which, c.r, c.g, c.b);
-    const std::string k = s + key;
-    auto it = cache.find(k);
+    // The same strings are drawn every frame: look the finished texture up by the request itself, and only
+    // choose a font / trim to fit (both measure the string repeatedly) the first time.
+    char rk[64];
+    snprintf(rk, sizeof rk, "|%d|%d|%d|%02x%02x%02x", size, int(bold), maxW, c.r, c.g, c.b);
+    const std::string req = s0 + rk;
+    auto it = cache.end();
+    const auto lit = layouts.find(req);
+    if (lit != layouts.end()) {
+        lit->second.frame = frameNo;
+        it = cache.find(lit->second.key);
+    }
     if (it == cache.end()) {
-        SDL_Surface *surf = TTF_RenderUTF8_Blended(f, s.c_str(), SDL_Color{c.r, c.g, c.b, 255});
-        if (!surf) return 0;
-        SDL_Texture *t = SDL_CreateTextureFromSurface(r, surf);
-        Cached cc{t, surf->w, surf->h, frameNo};
-        SDL_FreeSurface(surf);
-        it = cache.emplace(k, cc).first;
+        int which = 0;
+        const std::string s1 = pickFont(s0, size, bold, which);
+        TTF_Font *f = font(size, bold, which);
+        if (!f || s1.empty()) return 0;
+        std::string s = maxW > 0 ? elide(f, s1, maxW) : s1;
+        char key[64];
+        snprintf(key, sizeof key, "|%d|%d|%d|%02x%02x%02x", size, int(bold), which, c.r, c.g, c.b);
+        const std::string k = s + key;
+        it = cache.find(k);
+        if (it == cache.end()) {
+            SDL_Surface *surf = TTF_RenderUTF8_Blended(f, s.c_str(), SDL_Color{c.r, c.g, c.b, 255});
+            if (!surf) return 0;
+            SDL_Texture *t = SDL_CreateTextureFromSurface(r, surf);
+            Cached cc{t, surf->w, surf->h, frameNo};
+            SDL_FreeSurface(surf);
+            it = cache.emplace(k, cc).first;
+        }
+        layouts[req] = Layout{k, frameNo};
     }
     it->second.frame = frameNo;
     SDL_SetTextureAlphaMod(it->second.tex, c.a);
@@ -312,6 +333,11 @@ void Gfx::image(SDL_Texture *t, float x, float y, float w, float h, float rad) {
 
 void Gfx::endFrame() {
     ++frameNo;
+    if (layouts.size() > 800)
+        for (auto it = layouts.begin(); it != layouts.end();) {
+            if (frameNo - it->second.frame > 120) it = layouts.erase(it);
+            else ++it;
+        }
     if (cache.size() < 400) return;
     for (auto it = cache.begin(); it != cache.end();) {
         if (frameNo - it->second.frame > 120) { SDL_DestroyTexture(it->second.tex); it = cache.erase(it); }
@@ -416,6 +442,8 @@ void Thumbs::stop() {
     quit = true;
     cv.notify_all();
     for (auto &t : th) if (t.joinable()) t.join();
+    for (auto &p : ready) SDL_FreeSurface(p.second);
+    ready.clear();
     for (auto &[k, t] : tex) SDL_DestroyTexture(t);
     tex.clear();
 }
@@ -438,23 +466,34 @@ SDL_Texture *Thumbs::get(const std::string &vid) {
     return nullptr;
 }
 
+// Worker thread: JPEG bytes -> the square picture that gets shown. Decoding takes several milliseconds
+// each on the console, which used to happen on the main thread for every cover that arrived in a frame.
+static SDL_Surface *decodeSquare(const std::string &bytes) {
+    if (bytes.empty()) return nullptr;
+    SDL_Surface *src = IMG_Load_RW(SDL_RWFromConstMem(bytes.data(), int(bytes.size())), 1);
+    if (!src) return nullptr;
+    // sd/hqdefault are 4:3 with the 16:9 picture letterboxed in the middle: keep a centred square of the picture
+    const int ph = src->w * 9 / 16, side = std::min(ph, src->h);
+    SDL_Rect cr{(src->w - side) / 2, (src->h - side) / 2, side, side};
+    SDL_Surface *sq = side > 0 ? SDL_CreateRGBSurfaceWithFormat(0, side, side, 32, SDL_PIXELFORMAT_ARGB8888) : nullptr;
+    if (sq) SDL_BlitSurface(src, &cr, sq, nullptr);
+    SDL_FreeSurface(src);
+    return sq;
+}
+
 void Thumbs::pump() {
-    std::vector<std::pair<std::string, std::string>> got;
-    { std::lock_guard<std::mutex> l(mu); got.swap(ready); }
-    for (auto &[vid, bytes] : got) {
-        SDL_Surface *src = bytes.empty() ? nullptr : IMG_Load_RW(SDL_RWFromConstMem(bytes.data(), int(bytes.size())), 1);
-        if (!src) continue;
-        // sd/hqdefault are 4:3 with the 16:9 picture letterboxed in the middle: keep a centred square of the picture
-        const int ph = src->w * 9 / 16, side = std::min(ph, src->h);
-        SDL_Rect cr{(src->w - side) / 2, (src->h - side) / 2, side, side};
-        SDL_Surface *sq = SDL_CreateRGBSurfaceWithFormat(0, side, side, 32, SDL_PIXELFORMAT_ARGB8888);
-        SDL_Texture *t = nullptr;
-        if (sq) {
-            SDL_BlitSurface(src, &cr, sq, nullptr);
-            t = SDL_CreateTextureFromSurface(r, sq);
-            SDL_FreeSurface(sq);
-        }
-        SDL_FreeSurface(src);
+    // only the texture upload happens here, and at most two per frame: a page of results arriving
+    // together no longer stalls a frame
+    std::vector<std::pair<std::string, SDL_Surface *>> got;
+    {
+        std::lock_guard<std::mutex> l(mu);
+        const size_t n = std::min<size_t>(2, ready.size());
+        got.assign(ready.begin(), ready.begin() + std::ptrdiff_t(n));
+        ready.erase(ready.begin(), ready.begin() + std::ptrdiff_t(n));
+    }
+    for (auto &[vid, sq] : got) {
+        SDL_Texture *t = SDL_CreateTextureFromSurface(r, sq);
+        SDL_FreeSurface(sq);
         if (!t) continue;
         SDL_SetTextureScaleMode(t, SDL_ScaleModeLinear);
         tex[vid] = t;
@@ -482,8 +521,9 @@ void Thumbs::worker() {
         }
         Net::Response res = Net::get(YT::thumbUrl(vid, true), {}, 15);   // 640x480: sharp on a 1080p TV
         if (!res.ok()) res = Net::get(YT::thumbUrl(vid), {}, 15);        // not every video has one
+        SDL_Surface *sq = res.ok() ? decodeSquare(res.body) : nullptr;
         std::lock_guard<std::mutex> l(mu);
-        if (res.ok()) ready.emplace_back(vid, std::move(res.body));
-        else requested.erase(vid);   // try again later
+        if (sq) ready.emplace_back(vid, sq);
+        else if (!res.ok()) requested.erase(vid);   // try again later (a picture that won't decode is not asked for again)
     }
 }

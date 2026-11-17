@@ -7,6 +7,10 @@
 namespace Net {
 void init();
 void cleanup();
+// Keep up to `maxIdle` curl handles (with their open connections) between requests instead of connecting
+// afresh every time. A TLS handshake takes the Switch hundreds of milliseconds, and a song start is three
+// requests, a page of covers a dozen. 0 (the default) turns it off: every request opens its own connection.
+void setKeepAlive(int maxIdle);
 
 struct Response {
     long status = 0;
