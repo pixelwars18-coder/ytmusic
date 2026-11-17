@@ -1,0 +1,22 @@
+engine.cpp
+main.cpp
+resolve.cpp
+service.cpp
+shared.cpp
+sink_audren.cpp
+Failed to get system_resource_size (field not present).
+Failed to get version (field not present).
+Failed to get process_category (field not present).
+Failed to get optimize_memory_allocation (field not present).
+Failed to get disable_device_address_space_merge (field not present).
+Failed to get enable_alias_region_extra_size (field not present).
+Failed to get prevent_code_reads (field not present).
+Failed to get signature_key_generation (field not present).
+Failed to get program_id_range_min (field not present).
+Failed to get program_id_range_max (field not present).
+Failed to get program_id (field not present).
+Failed to get force_debug_prod (field not present).
+built ... ytmusic-bg.npdm
+linking ytmusic-bg.elf
+built ... ytmusic-bg.nso
+built ... ytmusic-bg.nsp
