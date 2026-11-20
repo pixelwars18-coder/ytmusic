@@ -1,4 +1,5 @@
 #pragma once
+#include "anim.h"
 #include "core.h"
 #include <QWidget>
 
@@ -26,4 +27,5 @@ private:
 
     Core *core;
     Id hover = None, dragging = None;
+    Hover *hv;
 };

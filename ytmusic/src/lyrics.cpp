@@ -68,6 +68,7 @@ void httpGet(QObject *parent, const QUrl &url, std::function<void(const QByteArr
 
 LyricsView::LyricsView(Core *c, QWidget *parent) : QWidget(parent), core(c) {
     hide();
+    enter = new OneShot(this, 180);
     setMouseTracking(true);
     anim.setInterval(16);
     connect(&anim, &QTimer::timeout, this, [this] {
@@ -96,6 +97,7 @@ void LyricsView::toggle() {
     else load();
     raise();
     show();
+    enter->start();
 }
 
 void LyricsView::closeView() { hide(); anim.stop(); emit closed(); }
@@ -258,9 +260,10 @@ void LyricsView::paintEvent(QPaintEvent *) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
     const Palette &c = P();
+    if (enter->active()) { const qreal v = enter->value(); p.setOpacity(v); p.translate(0, (1 - v) * 10); }
     p.setPen(Qt::NoPen);
     p.setBrush(c.surface);
-    p.drawRoundedRect(rect(), 18, 18);
+    p.drawRoundedRect(rect(), 12, 12);
 
     const Track *t = core->nowPlaying();
     p.setPen(c.onSurface);

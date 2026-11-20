@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "playerbar.h"
 #include "lyrics.h"
+#include "shell.h"
 #include "tracklist.h"
 #include "paths.h"
 #include "ui_common.h"
@@ -32,6 +33,8 @@
 #include <QScrollBar>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
+#include <QVariantAnimation>
 #include <QWindow>
 #include <malloc.h>
 #include "thumbs.h"
@@ -53,6 +56,7 @@ public:
         resize(qMin(parentWidget()->width() - 40, fm.horizontalAdvance(t) + 40), 36);
         raise();
         show();
+        enter.start();
         update();
         timer.start(2800);
     }
@@ -61,9 +65,10 @@ protected:
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing);
         const Palette &c = P();
+        if (enter.active()) { p.setOpacity(enter.value()); p.translate(0, (1 - enter.value()) * 8); }
         p.setBrush(c.surfaceVariant);
-        p.setPen(QPen(c.primary, 1));
-        p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 18, 18);
+        p.setPen(QPen(withAlpha(Qt::white, 30), 1));
+        p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 10, 10);
         p.setFont(fnt(13, QFont::Medium));
         p.setPen(c.onSurface);
         p.drawText(rect().adjusted(16, 0, -16, 0), Qt::AlignCenter, QFontMetrics(p.font()).elidedText(text, Qt::ElideRight, width() - 32));
@@ -71,19 +76,20 @@ protected:
 private:
     QString text;
     QTimer timer;
+    OneShot enter{this, 180};
 };
 
 // ------------------------------------------------------------------ SearchBox
 SearchBox::SearchBox(QWidget *parent) : QWidget(parent) {
-    setFixedHeight(50);
+    setFixedHeight(32);
     setMouseTracking(true);
     edit = new QLineEdit(this);
     edit->setFrame(false);
-    edit->setPlaceholderText(QStringLiteral("Search YouTube or paste a link…   ( / )"));
+    edit->setPlaceholderText(QStringLiteral("Search or paste a link…   /"));
     edit->setContextMenuPolicy(Qt::DefaultContextMenu);
     auto restyle = [this] {
         const Palette &c = P();
-        edit->setFont(fnt(15));
+        edit->setFont(fnt(13));
         edit->setStyleSheet(QStringLiteral("QLineEdit{background:transparent;border:none;color:%1;"
                                            "selection-background-color:%2;selection-color:%3}")
                                 .arg(c.onSurface.name(), c.primary.name(), c.onPrimary.name()));
@@ -95,15 +101,15 @@ SearchBox::SearchBox(QWidget *parent) : QWidget(parent) {
     connect(&Theme::I(), &Theme::changed, this, restyle);
     restyle();
     connect(edit, &QLineEdit::returnPressed, this, [this] { emit submitted(edit->text()); });
-    connect(edit, &QLineEdit::textChanged, this, qOverload<>(&QWidget::update));
+    connect(edit, &QLineEdit::textChanged, this, [this] { resizeEvent(nullptr); update(); });
 }
 
-QRectF SearchBox::goRect() const { return QRectF(width() - 6 - 38, 6, 38, 38); }
-QRectF SearchBox::clearRect() const { return QRectF(goRect().left() - 4 - 32, 9, 32, 32); }
+QRectF SearchBox::goRect() const { return QRectF(); }
+QRectF SearchBox::clearRect() const { return QRectF(width() - 4 - 24, 4, 24, 24); }
 
 void SearchBox::resizeEvent(QResizeEvent *) {
-    const int right = edit->text().isEmpty() ? int(goRect().left()) - 8 : int(clearRect().left()) - 4;
-    edit->setGeometry(18 + 20 + 10, 8, right - 48, 34);
+    const int right = edit->text().isEmpty() ? width() - 10 : int(clearRect().left()) - 2;
+    edit->setGeometry(32, 4, right - 32, 24);
 }
 
 void SearchBox::paintEvent(QPaintEvent *) {
@@ -111,19 +117,15 @@ void SearchBox::paintEvent(QPaintEvent *) {
     p.setRenderHint(QPainter::Antialiasing);
     const Palette &c = P();
     const bool focus = edit->hasFocus();
-    p.setBrush(c.surfaceVariant);
-    p.setPen(QPen(focus ? c.primary : c.outline, focus ? 2 : 1));
-    p.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), 25, 25);
-    Icons::paint(p, QRectF(18, 15, 20, 20), QStringLiteral("search"), c.onSurfaceVariant);
+    p.setBrush(withAlpha(Qt::white, focus ? 12 : 8));
+    p.setPen(QPen(focus ? withAlpha(c.primary, 200) : withAlpha(Qt::white, 24), 1));
+    p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 8, 8);
+    Icons::paint(p, QRectF(10, 9, 14, 14), QStringLiteral("search"), c.onSurfaceVariant);
     if (!edit->text().isEmpty()) drawIconButton(p, clearRect(), QStringLiteral("x"), hover == 1);
-    drawIconButton(p, goRect(), QStringLiteral("search"), false, true);
-    // geometry depends on whether the clear button is shown
-    const int right = edit->text().isEmpty() ? int(goRect().left()) - 8 : int(clearRect().left()) - 4;
-    if (edit->width() != right - 48) edit->setGeometry(48, 8, right - 48, 34);
 }
 
 void SearchBox::mouseMoveEvent(QMouseEvent *e) {
-    const int h = (!edit->text().isEmpty() && clearRect().contains(e->position())) ? 1 : goRect().contains(e->position()) ? 2 : 0;
+    const int h = (!edit->text().isEmpty() && clearRect().contains(e->position())) ? 1 : 0;
     if (h != hover) {
         hover = h;
         setCursor(h ? Qt::PointingHandCursor : Qt::ArrowCursor);
@@ -136,8 +138,6 @@ void SearchBox::mousePressEvent(QMouseEvent *e) {
     if (!edit->text().isEmpty() && clearRect().contains(e->position())) {
         edit->clear();
         edit->setFocus();
-    } else if (goRect().contains(e->position())) {
-        emit submitted(edit->text());
     } else {
         edit->setFocus();
     }
@@ -145,12 +145,15 @@ void SearchBox::mousePressEvent(QMouseEvent *e) {
 
 // -------------------------------------------------------------------- TabsBar
 TabsBar::TabsBar(Core *c, QWidget *parent) : QWidget(parent), core(c) {
+    hv = new Hover(this);
+    enter = new OneShot(this, 180);
     setFixedHeight(32);
     setMouseTracking(true);
 }
 
 void TabsBar::setTab(Tab t) {
     tab = t;
+    enter->start();
     update();
 }
 
@@ -162,11 +165,6 @@ QVector<TabsBar::Item> TabsBar::items() const {
         v.append({QRectF(x, 1, w, 30), id, label, icon, accent});
         x += w + 8;
     };
-    add(4, QStringLiteral("For you"), {}, tab == Tab::Home);
-    add(0, QStringLiteral("Results"), {}, tab == Tab::Results);
-    add(1, core->queue.isEmpty() ? QStringLiteral("Queue") : QStringLiteral("Queue  %1").arg(core->queue.size()), {}, tab == Tab::Queue);
-    add(2, core->liked.isEmpty() ? QStringLiteral("Liked") : QStringLiteral("Liked  %1").arg(core->liked.size()), {}, tab == Tab::Liked);
-    add(3, core->playlists.isEmpty() ? QStringLiteral("Saved") : QStringLiteral("Saved  %1").arg(core->playlists.size()), {}, tab == Tab::Saved);
 
     const bool detail = tab == Tab::Results && core->detailOpen;
     const bool savedOpen = tab == Tab::Saved && !core->savedOpenId.isEmpty();
@@ -175,9 +173,6 @@ QVector<TabsBar::Item> TabsBar::items() const {
     // right side, laid out from the right edge: hide button, then actions (last added = leftmost)
     QVector<Item> r;
     auto addR = [&](int id, const QString &label, const QString &icon) { r.append({QRectF(), id, label, icon, false}); };
-    addR(9, QString(), QStringLiteral("x"));
-    addR(8, QString(), QStringLiteral("gear"));
-    addR(7, QString(), QStringLiteral("lyrics"));
     const bool canSel = tab == Tab::Queue || tab == Tab::Liked || tab == Tab::Saved;
     const bool savedList = tab == Tab::Saved && !savedOpen;
     const bool anything = savedList ? !core->playlists.isEmpty() : hasTracks;
@@ -250,16 +245,17 @@ QVector<TabsBar::Item> TabsBar::items() const {
 void TabsBar::paintEvent(QPaintEvent *) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
+    if (enter->active()) p.setOpacity(enter->value());
     const auto its = items();
     for (int i = 0; i < its.size(); ++i) {
         const Item &it = its[i];
-        if (it.id == 9) drawIconButton(p, it.r, QStringLiteral("x"), hover == i);
-        else if (it.id == 30) drawIconButton(p, it.r, QStringLiteral("back"), hover == i);
+        if (it.id == 9) drawIconButton(p, it.r, QStringLiteral("x"), hv->get(it.id));
+        else if (it.id == 30) drawIconButton(p, it.r, QStringLiteral("back"), hv->get(it.id));
         else if (it.id == 31) {
             p.setFont(fnt(13, QFont::DemiBold));
             p.setPen(P().onSurface);
             p.drawText(it.r, Qt::AlignVCenter | Qt::AlignLeft, it.label);
-        } else drawPill(p, it.r, it.label, it.icon, it.accent, hover == i);
+        } else drawPill(p, it.r, it.label, it.icon, it.accent, hv->get(it.id));
     }
 }
 
@@ -269,12 +265,18 @@ void TabsBar::mouseMoveEvent(QMouseEvent *e) {
     for (int i = 0; i < its.size(); ++i)
         if (its[i].id != 31 && its[i].r.contains(e->position())) h = i;
     if (h != hover) {
+        if (hover >= 0 && hover < its.size()) hv->set(its[hover].id, false);
+        if (h >= 0) hv->set(its[h].id, true);
         hover = h;
         setCursor(h >= 0 ? Qt::PointingHandCursor : Qt::ArrowCursor);
         update();
     }
 }
-void TabsBar::leaveEvent(QEvent *) { hover = -1; update(); }
+void TabsBar::leaveEvent(QEvent *) {
+    for (const Item &it : items()) hv->set(it.id, false);
+    hover = -1;
+    update();
+}
 
 void TabsBar::mousePressEvent(QMouseEvent *e) {
     if (e->button() != Qt::LeftButton) return;
@@ -307,6 +309,10 @@ MainWindow::MainWindow(Core *c, Mpris *mpris) : core(c) {
     setMinimumSize(760, 520);
     resize(980, 640);
 
+    Theme::I().setFollowNoctalia(core->followNoctalia);
+    rail = new RailBar(core, this);
+    panel = new SidePanel(core, this);
+    topBar = new TopBar(this);
     search = new SearchBox(this);
     tabs = new TabsBar(core, this);
     tracks = new TrackList(core, this);
@@ -319,11 +325,29 @@ MainWindow::MainWindow(Core *c, Mpris *mpris) : core(c) {
         search->edit->setText(q);
         doSearch(q);
     });
-    connect(tabs, &TabsBar::tabChanged, this, &MainWindow::setTab);
-    connect(tabs, &TabsBar::hideRequested, this, &QWidget::hide);
+    topBar->titleFn = [this]() -> QString {
+        switch (tabs->tab) {
+        case Tab::Home: return QStringLiteral("For you");
+        case Tab::Results: return core->detailOpen ? core->detail.title : QStringLiteral("Search");
+        case Tab::Queue: return QStringLiteral("Queue");
+        case Tab::Liked: return QStringLiteral("Liked songs");
+        case Tab::Saved: { const SavedPlaylist *p = core->savedOpen(); return p ? p->name : QStringLiteral("Playlists"); }
+        }
+        return {};
+    };
+    connect(rail, &RailBar::tabChanged, this, &MainWindow::setTab);
+    connect(rail, &RailBar::actionTriggered, this, &MainWindow::onAction);
+    connect(rail, &RailBar::hideRequested, this, &QWidget::hide);
+    connect(panel, &SidePanel::likedRequested, this, [this] { setTab(Tab::Liked); });
+    connect(panel, &SidePanel::playlistRequested, this, [this](const QString &id) { setTab(Tab::Saved); core->openSaved(id); });
+    auto togglePanel = [this] { panelOpen = !panelOpen; animatePanel(); };
+    connect(panel, &SidePanel::collapseRequested, this, togglePanel);
+    connect(topBar, &TopBar::toggleRequested, this, togglePanel);
     connect(tabs, &TabsBar::actionTriggered, this, &MainWindow::onAction);
     connect(tracks, &TrackList::addToPlaylistRequested, this, &MainWindow::addToPlaylistMenu);
     connect(tracks, &TrackList::trackMenuRequested, this, &MainWindow::showTrackMenu);
+    connect(tracks, &TrackList::tabRequested, this, &MainWindow::setTab);
+    connect(tracks, &TrackList::lyricsRequested, this, [this] { lyricsView->toggle(); });
     connect(tracks, &TrackList::deletePlaylistRequested, this, [this](const QString &id) {
         for (const SavedPlaylist &p : std::as_const(core->playlists))
             if (p.id == id && QMessageBox::question(this, QStringLiteral("Delete playlist"), QStringLiteral("Delete “%1”?").arg(p.name)) == QMessageBox::Yes) {
@@ -341,9 +365,14 @@ MainWindow::MainWindow(Core *c, Mpris *mpris) : core(c) {
     applyPalette();
     auto drag = [this] { if (windowHandle()) windowHandle()->startSystemMove(); };
     connect(tabs, &TabsBar::dragRequested, this, drag);
+    connect(rail, &RailBar::dragRequested, this, drag);
+    connect(topBar, &TopBar::dragRequested, this, drag);
 
     auto repaintAll = [this] {
         tabs->update();
+        rail->update();
+        panel->update();
+        topBar->update();
         tracks->refresh();
         bar->update();
         refreshTray();
@@ -383,6 +412,9 @@ MainWindow::MainWindow(Core *c, Mpris *mpris) : core(c) {
 }
 
 void MainWindow::setTab(Tab t) {
+    rail->tab = t;
+    rail->update();
+    topBar->update();
     tabs->setTab(t);
     tracks->setTab(t);
 }
@@ -425,26 +457,81 @@ QPixmap MainWindow::snapshot() {
     return pm;
 }
 
-void MainWindow::resizeEvent(QResizeEvent *) {
-    const int m = 20, w = width() - 2 * m;
-    search->setGeometry(m, m, w, 50);
-    tabs->setGeometry(m, m + 50 + 14, w, 32);
-    const int top = m + 50 + 14 + 32 + 14;
-    const int barY = height() - m - 92;
-    bar->setGeometry(m, barY, w, 92);
-    tracks->setGeometry(m, top, w, barY - 16 - top);
+void MainWindow::layoutAll() {
+    constexpr int railW = 48, topH = 44, bm = 12, barH = 92, m = 20;
+    const int W = width(), H = height();
+    const int pw = int(std::round(panelW));
+    const int barY = H - bm - barH;
+    rail->setGeometry(0, 0, railW, barY - bm);
+    panel->setVisible(pw > 4);
+    panel->setGeometry(railW, 0, pw, barY - bm);
+    const int x0 = railW + pw;
+    topBar->setGeometry(x0, 0, W - x0, topH);
+    const int w = W - x0 - 2 * m;
+    const int sw = qBound(180, w / 2, 340);
+    search->setGeometry(W - m - sw, 6, sw, 32);
+    search->raise();
+    tabs->setGeometry(x0 + m, topH + 10, w, 32);
+    const int top = topH + 10 + 32 + 10;
+    tracks->setGeometry(x0 + m, top, w, barY - bm - top);
     lyricsView->setGeometry(tracks->geometry());
+    bar->setGeometry(bm, barY, W - 2 * bm, barH);
+}
+
+// Collapsing / opening the library panel glides over 200 ms (VoiceStudio's sidebar easing).
+void MainWindow::animatePanel() {
+    const qreal to = panelShown() ? 260 : 0;
+    if (!panelAnim) {
+        panelAnim = new QVariantAnimation(this);
+        panelAnim->setDuration(200);
+        QEasingCurve c(QEasingCurve::BezierSpline);
+        c.addCubicBezierSegment(QPointF(0.4, 0.0), QPointF(0.2, 1.0), QPointF(1.0, 1.0));
+        panelAnim->setEasingCurve(c);
+        connect(panelAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) { panelW = v.toReal(); layoutAll(); update(); });
+    }
+    panelAnim->stop();
+    panelAnim->setStartValue(panelW);
+    panelAnim->setEndValue(to);
+    panelAnim->start();
+}
+
+void MainWindow::resizeEvent(QResizeEvent *) {
+    // follow the window: the panel hides itself on narrow windows
+    if (!panelAnim || panelAnim->state() != QAbstractAnimation::Running) panelW = panelShown() ? 260 : 0;
+    layoutAll();
 }
 
 void MainWindow::paintEvent(QPaintEvent *) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
     const Palette &c = P();
+    constexpr int railW = 48, topH = 44, bm = 12, barH = 92;
+    const int pw = int(std::round(panelW));
+    const int chromeH = height() - bm - barH - bm;
+    const QRectF frame = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+    QPainterPath clip;
+    clip.addRoundedRect(frame, 14, 14);
+    p.setClipPath(clip);
     QColor bg = c.surface;
-    bg.setAlphaF(0.94);
-    p.setBrush(bg);
-    p.setPen(QPen(c.outline, 1));
-    p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 24, 24);
+    bg.setAlphaF(0.97);
+    p.fillPath(clip, bg);
+    // rail and library panel: translucent with VoiceStudio's soft diagonal sheen
+    for (const QRectF &r : {QRectF(0, 0, railW, chromeH), QRectF(railW, 0, pw, chromeH)}) {
+        if (r.width() <= 0) continue;
+        QLinearGradient g(r.topLeft(), r.bottomRight());
+        g.setColorAt(0, withAlpha(Qt::white, 13));
+        g.setColorAt(0.44, withAlpha(Qt::white, 0));
+        p.fillRect(r, c.surfaceVariant);
+        p.fillRect(r, g);
+    }
+    p.setPen(QPen(withAlpha(Qt::white, 18), 1));
+    p.drawLine(QPointF(railW, 0), QPointF(railW, chromeH));
+    if (pw > 0) p.drawLine(QPointF(railW + pw, 0), QPointF(railW + pw, chromeH));
+    p.drawLine(QPointF(railW + pw, topH), QPointF(width(), topH));
+    p.setClipping(false);
+    p.setBrush(Qt::NoBrush);
+    p.setPen(QPen(withAlpha(Qt::white, 26), 1));
+    p.drawRoundedRect(frame, 14, 14);
 }
 
 // -------------------------------------------------- frameless move / resize
@@ -522,6 +609,7 @@ void MainWindow::keyPressEvent(QKeyEvent *e) {
     case Qt::Key_Up: core->setVolume(core->volume + 5); break;
     case Qt::Key_Down: core->setVolume(core->volume - 5); break;
     case Qt::Key_Y: lyricsView->toggle(); break;
+    case Qt::Key_B: if (ctrl) { panelOpen = !panelOpen; animatePanel(); } break;
     case Qt::Key_Escape: if (lyricsView->isVisible()) lyricsView->closeView(); else hide(); break;
     default: QWidget::keyPressEvent(e);
     }
@@ -669,6 +757,9 @@ void MainWindow::openSettings() {
     auto *hidden = new QCheckBox(QStringLiteral("Start hidden in the tray"));
     hidden->setChecked(core->startHidden);
     lay->addRow(hidden);
+    auto *follow = new QCheckBox(QStringLiteral("Follow the Noctalia colour palette"));
+    follow->setChecked(core->followNoctalia);
+    lay->addRow(follow);
     auto *tray = new QCheckBox(QStringLiteral("Close button hides to the tray (off: quits)"));
     tray->setChecked(core->closeToTray);
     lay->addRow(tray);
@@ -726,6 +817,8 @@ void MainWindow::openSettings() {
     core->setPageSize(page->currentData().toInt());
     core->setStartHidden(hidden->isChecked());
     core->setCloseToTray(tray->isChecked());
+    core->setFollowNoctalia(follow->isChecked());
+    Theme::I().setFollowNoctalia(follow->isChecked());
     core->setAudioQuality(quality->currentData().toInt());
     core->setMemoryMode(memory->currentData().toInt());
 }

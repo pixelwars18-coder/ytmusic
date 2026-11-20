@@ -23,7 +23,15 @@ Theme::Theme() {
     reload();
 }
 
+void Theme::setFollowNoctalia(bool on) {
+    if (on == follow) return;
+    follow = on;
+    if (on) reload();
+    else { pal = Palette(); emit changed(); }
+}
+
 void Theme::reload() {
+    if (!follow) return;
     if (!watcher.files().contains(file) && QFile::exists(file)) watcher.addPath(file);
     QFile f(file);
     if (!f.open(QIODevice::ReadOnly)) return;

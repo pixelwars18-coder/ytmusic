@@ -1,4 +1,5 @@
 #pragma once
+#include "anim.h"
 #include "core.h"
 #include <QHash>
 #include <QTimer>
@@ -35,5 +36,6 @@ private:
     qreal contentH = 0, scrollY = 0, targetY = 0;
     qint64 lastWheel = 0;
     QTimer anim;
+    OneShot *enter;
     QHash<QString, bool> inFlight;
 };

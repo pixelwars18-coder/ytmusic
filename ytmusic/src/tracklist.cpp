@@ -14,6 +14,8 @@ TrackList::TrackList(Core *c, QWidget *parent) : QAbstractScrollArea(parent), co
     viewport()->setMouseTracking(true);
     setFocusPolicy(Qt::NoFocus);
     verticalScrollBar()->setSingleStep(22);
+    rowHv = new Hover(viewport());
+    enter = new OneShot(viewport(), 180);
     clock.start();
     spin.setInterval(50);
     connect(&spin, &QTimer::timeout, viewport(), qOverload<>(&QWidget::update));
@@ -36,7 +38,9 @@ void TrackList::setTab(Tab t) {
     tab = t;
     if (selecting) stopSelect();
     hover = {};
+    rowHv->setOnly(-1);
     verticalScrollBar()->setValue(0);
+    enter->start();
     refresh();
 }
 
@@ -200,6 +204,9 @@ TrackList::Hit TrackList::hitTest(const QPoint &pt) const {
 void TrackList::mouseMoveEvent(QMouseEvent *e) {
     const Hit h = hitTest(e->position().toPoint());
     if (h.kind != hover.kind || h.idx != hover.idx) {
+        const int ok = hover.kind == Tile ? 1000 + hover.idx : hover.idx, nk = h.kind == Tile ? 1000 + h.idx : h.idx;
+        if (ok != nk) { rowHv->set(ok, false); if (h.kind != None) rowHv->set(nk, true); }
+        else if (h.kind != None) rowHv->set(nk, true);
         hover = h;
         viewport()->setCursor(h.kind == None ? Qt::ArrowCursor : Qt::PointingHandCursor);
         viewport()->update();
@@ -207,6 +214,7 @@ void TrackList::mouseMoveEvent(QMouseEvent *e) {
 }
 
 void TrackList::leaveEvent(QEvent *) {
+    rowHv->setOnly(-1);
     hover = {};
     viewport()->update();
 }
@@ -323,6 +331,11 @@ void TrackList::paintEvent(QPaintEvent *) {
     QPainter p(viewport());
     p.setRenderHint(QPainter::Antialiasing);
     p.setRenderHint(QPainter::SmoothPixmapTransform);
+    if (enter->active()) {                       // page enter, like VoiceStudio's 150 ms fade-in
+        const qreal v = enter->value();
+        p.setOpacity(v);
+        p.translate(0, (1 - v) * 8);
+    }
     if (feedMode()) { paintFeed(p); return; }
     const Palette &c = P();
     const int n = count();
@@ -380,28 +393,28 @@ void TrackList::paintEvent(QPaintEvent *) {
 
         p.setPen(Qt::NoPen);
         if (active) {
-            p.setBrush(c.surfaceVariant);
-            p.setPen(QPen(c.outline, 1));
-            p.drawRoundedRect(row.adjusted(0.5, 0.5, -0.5, -0.5), 16, 16);
-        } else if (rowHover) {
-            p.setBrush(QColor(255, 255, 255, 10));
-            p.drawRoundedRect(row, 16, 16);
+            p.setBrush(withAlpha(Qt::white, 14));
+            p.setPen(QPen(withAlpha(Qt::white, 26), 1));
+            p.drawRoundedRect(row.adjusted(0.5, 0.5, -0.5, -0.5), 10, 10);
+        } else if (rowHv->get(i) > 0.001) {
+            p.setBrush(withAlpha(Qt::white, int(12 * rowHv->get(i))));
+            p.drawRoundedRect(row, 10, 10);
         }
 
         const QRectF th(row.left() + 8, row.top() + 8, 80, 48);
-        if (t) drawThumb(p, th, t->vid, 12);
-        else if (remoteCards()) drawThumbUrl(p, th, QStringLiteral("pl:") + core->playlistResults[i].url, core->playlistResults[i].thumbUrl, 12);
+        if (t) drawThumb(p, th, t->vid, 8);
+        else if (remoteCards()) drawThumbUrl(p, th, QStringLiteral("pl:") + core->playlistResults[i].url, core->playlistResults[i].thumbUrl, 8);
         else {
             const SavedPlaylist &sp = core->playlists[i];
-            if (!sp.tracks.isEmpty()) drawThumb(p, th, sp.tracks.first().vid, 12);
-            else drawThumbUrl(p, th, QString(), QString(), 12);
+            if (!sp.tracks.isEmpty()) drawThumb(p, th, sp.tracks.first().vid, 8);
+            else drawThumbUrl(p, th, QString(), QString(), 8);
             // song-count badge
             const QString badge = QString::number(sp.tracks.size());
             const QFontMetrics bfm(fnt(11, QFont::Medium));
             const qreal bw = bfm.horizontalAdvance(badge) + 24;
             const QRectF br(th.right() - bw - 4, th.bottom() - 20, bw, 16);
             p.setPen(Qt::NoPen);
-            p.setBrush(QColor(7, 7, 34, 200));
+            p.setBrush(QColor(0, 0, 0, 190));
             p.drawRoundedRect(br, 8, 8);
             Icons::paint(p, QRectF(br.left() + 5, br.top() + 2, 12, 12), QStringLiteral("list"), c.onSurface);
             p.setFont(fnt(11, QFont::Medium));
@@ -410,8 +423,8 @@ void TrackList::paintEvent(QPaintEvent *) {
         }
         if (active) {
             p.setPen(Qt::NoPen);
-            p.setBrush(QColor(8, 8, 32, 165));
-            p.drawRoundedRect(th, 12, 12);
+            p.setBrush(QColor(0, 0, 0, 150));
+            p.drawRoundedRect(th, 8, 8);
             Icons::paint(p, QRectF(th.center().x() - 10, th.center().y() - 10, 20, 20),
                          core->paused ? QStringLiteral("play") : QStringLiteral("music"), c.primary);
         }
@@ -474,6 +487,8 @@ void TrackList::rebuildFeed() {
     int y = 0;
     auto add = [&](int kind, int sec, int trk, int h) { feedItems.append({kind, sec, trk, y, h}); y += h; };
     add(0, -1, -1, 88);
+    add(3, -1, 0, 104);   // quick-start tiles, like VoiceStudio's home cards
+    add(3, -1, 3, 104);
     for (int s = 0; s < feedSecs.size(); ++s) {
         add(1, s, -1, 64);
         const int n = qMin(8, int(feedSecs[s].tracks.size()));
@@ -492,7 +507,13 @@ TrackList::Hit TrackList::hitFeed(const QPoint &pt) const {
         if (y > viewport()->height()) break;
         if (y + it.h < 0 || pt.y() < y || pt.y() >= y + it.h) continue;
         if (it.kind == 0) {
-            return QRectF(vw - 8 - 44, y + 18, 44, 44).contains(pt) ? Hit{HeroRefresh, i} : Hit{};
+            return {};
+        }
+        if (it.kind == 3) {
+            const qreal tw = (vw - 8 - 2 * 12) / 3.0;
+            const int col = int((pt.x() - 4) / (tw + 12));
+            if (col < 0 || col > 2 || pt.x() < 4 || pt.x() > 4 + col * (tw + 12) + tw || pt.y() > y + 92) return {};
+            return {Tile, it.track + col};
         }
         if (it.kind == 1) {
             if (feedSecs[it.section].tracks.isEmpty()) return {};
@@ -512,6 +533,17 @@ TrackList::Hit TrackList::hitFeed(const QPoint &pt) const {
 }
 
 void TrackList::pressFeed(const Hit &h) {
+    if (h.kind == Tile) {
+        switch (h.idx) {
+        case 0: emit tabRequested(Tab::Liked); break;
+        case 1: emit tabRequested(Tab::Queue); break;
+        case 2: emit tabRequested(Tab::Saved); break;
+        case 3: if (!core->liked.isEmpty()) core->playTracks(core->liked, 0, true); break;
+        case 4: if (const Track *t = core->nowPlaying()) core->startRadio(*t); else if (!core->recent.isEmpty()) core->startRadio(core->recent.first()); break;
+        case 5: emit lyricsRequested(); break;
+        }
+        return;
+    }
     if (h.idx < 0 || h.idx >= feedItems.size()) return;
     const FeedItem &it = feedItems[h.idx];
     switch (h.kind) {
@@ -555,11 +587,50 @@ void TrackList::paintFeed(QPainter &p) {
                                 : (core->feed.isEmpty() ? QStringLiteral("Couldn't load picks. Check your connection and refresh.")
                                                         : QStringLiteral("Picks from what you play and like"));
             p.drawText(QRectF(4, y + 50, vw - 80, 22), Qt::AlignVCenter, sub);
-            const QRectF b(vw - 8 - 44, y + 18, 44, 44);
-            p.setPen(Qt::NoPen);
-            p.setBrush(hv(HeroRefresh) ? c.surfaceVariant : c.outline);
-            p.drawEllipse(b);
-            Icons::paint(p, QRectF(b.center().x() - 10, b.center().y() - 10, 20, 20), QStringLiteral("refresh"), c.onSurface);
+            continue;
+        }
+        if (it.kind == 3) { // quick-start tiles
+            struct T { const char *icon, *title; QColor accent; QString sub; };
+            const QVector<T> tl = {
+                {"heart", "Liked songs", QColor("#e5658a"), QStringLiteral("%1 songs").arg(core->liked.size())},
+                {"list", "Queue", c.secondary, QStringLiteral("%1 up next").arg(core->queue.size())},
+                {"bookmark", "Playlists", QColor("#b8a1ee"), QStringLiteral("%1 saved").arg(core->playlists.size())},
+                {"shuffle", "Shuffle liked", c.tertiary, QStringLiteral("Play your likes on shuffle")},
+                {"music", "Start radio", QColor("#e8b54a"), QStringLiteral("Songs like what's playing")},
+                {"lyrics", "Lyrics", QColor("#79b9ee"), QStringLiteral("Follow along in time")},
+            };
+            const qreal tw = (vw - 8 - 2 * 12) / 3.0;
+            for (int col = 0; col < 3; ++col) {
+                const int ti = it.track + col;
+                const T &t = tl[ti];
+                const qreal lvl = rowHv->get(1000 + ti);
+                const QRectF r(4 + col * (tw + 12), y, tw, 92);
+                p.setPen(Qt::NoPen);
+                p.setBrush(c.surfaceVariant);
+                p.drawRoundedRect(r, 14, 14);
+                QRadialGradient rg(r.topRight(), r.width() * 0.75);          // soft accent glow in the corner
+                rg.setColorAt(0, withAlpha(t.accent, int(26 + 20 * lvl)));
+                rg.setColorAt(1, withAlpha(t.accent, 0));
+                p.setBrush(rg);
+                p.drawRoundedRect(r, 14, 14);
+                QColor bd = t.accent;
+                bd.setAlpha(int(22 + 78 * lvl));
+                p.setBrush(Qt::NoBrush);
+                p.setPen(QPen(lvl > 0.01 ? bd : withAlpha(Qt::white, 20), 1));
+                p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), 14, 14);
+                const QRectF ic(r.left() + 14, r.top() + 14, 32, 32);
+                p.setPen(QPen(withAlpha(t.accent, 80), 1));
+                p.setBrush(withAlpha(t.accent, 36));
+                p.drawRoundedRect(ic.adjusted(0.5, 0.5, -0.5, -0.5), 9, 9);
+                Icons::paint(p, QRectF(ic.center().x() - 9, ic.center().y() - 9, 18, 18), QString::fromLatin1(t.icon), t.accent);
+                p.setFont(fnt(14, QFont::Medium));
+                p.setPen(c.onSurface);
+                p.drawText(QRectF(r.left() + 14, r.top() + 52, r.width() - 28, 18), Qt::AlignVCenter, QString::fromLatin1(t.title));
+                p.setFont(fnt(12));
+                p.setPen(c.onSurfaceVariant);
+                p.drawText(QRectF(r.left() + 14, r.top() + 70, r.width() - 50, 16), Qt::AlignVCenter, QFontMetrics(fnt(12)).elidedText(t.sub, Qt::ElideRight, int(r.width() - 50)));
+                Icons::paint(p, QRectF(r.right() - 30 + 4 * lvl, r.bottom() - 28, 14, 14), QStringLiteral("arrow"), withAlpha(c.onSurfaceVariant, int(120 + 100 * lvl)));
+            }
             continue;
         }
         if (it.kind == 1) { // shelf header
@@ -589,19 +660,19 @@ void TrackList::paintFeed(QPainter &p) {
         const bool rowHover = hover.idx == i && hover.kind != None;
         p.setPen(Qt::NoPen);
         if (active) {
-            p.setBrush(c.surfaceVariant);
-            p.setPen(QPen(c.outline, 1));
-            p.drawRoundedRect(row.adjusted(0.5, 0.5, -0.5, -0.5), 16, 16);
-        } else if (rowHover) {
-            p.setBrush(QColor(255, 255, 255, 10));
-            p.drawRoundedRect(row, 16, 16);
+            p.setBrush(withAlpha(Qt::white, 14));
+            p.setPen(QPen(withAlpha(Qt::white, 26), 1));
+            p.drawRoundedRect(row.adjusted(0.5, 0.5, -0.5, -0.5), 10, 10);
+        } else if (rowHv->get(i) > 0.001) {
+            p.setBrush(withAlpha(Qt::white, int(12 * rowHv->get(i))));
+            p.drawRoundedRect(row, 10, 10);
         }
         const QRectF th(row.left() + 8, row.top() + 8, 80, 48);
-        drawThumb(p, th, t.vid, 12);
+        drawThumb(p, th, t.vid, 8);
         if (active) {
             p.setPen(Qt::NoPen);
-            p.setBrush(QColor(8, 8, 32, 165));
-            p.drawRoundedRect(th, 12, 12);
+            p.setBrush(QColor(0, 0, 0, 150));
+            p.drawRoundedRect(th, 8, 8);
             Icons::paint(p, QRectF(th.center().x() - 10, th.center().y() - 10, 20, 20), core->paused ? QStringLiteral("play") : QStringLiteral("music"), c.primary);
         }
         const qreal tx = th.right() + 12, tw = dur.left() - tx - 4;

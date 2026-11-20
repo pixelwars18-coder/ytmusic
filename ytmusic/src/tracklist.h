@@ -1,4 +1,5 @@
 #pragma once
+#include "anim.h"
 #include "core.h"
 #include <QAbstractScrollArea>
 #include <QElapsedTimer>
@@ -24,6 +25,8 @@ public:
 signals:
     void selectionChanged();
     void searchRequested(const QString &q);
+    void tabRequested(Tab t);        // a quick-start tile on the For you page
+    void lyricsRequested();
     void addToPlaylistRequested(const Track &t);
     void trackMenuRequested(const Track &t, int index, const QPoint &globalPos);   // right-click on a song
     void deletePlaylistRequested(const QString &id);
@@ -34,7 +37,7 @@ protected:
     void leaveEvent(QEvent *) override;
     void resizeEvent(QResizeEvent *) override;
 private:
-    enum Kind { None, Row, Like, AddPl, Act1, Act2, LoadMore, Chip, ClearHist, HeaderPlay, HeaderShuffle, HeroRefresh };
+    enum Kind { None, Row, Like, AddPl, Act1, Act2, LoadMore, Chip, ClearHist, HeaderPlay, HeaderShuffle, HeroRefresh, Tile };
     struct Hit { Kind kind = None; int idx = -1; };
     static constexpr int kRowH = 68, kRowInner = 64;
 
@@ -52,7 +55,7 @@ private:
     void rowRectsAt(qreal y, QRectF &row, QRectF &like, QRectF &addpl, QRectF &a1, QRectF &a2, QRectF &dur) const;
 
     // "For you" page: hero + shelves (header + up to 8 rows each), laid out in a flat list
-    struct FeedItem { int kind; int section; int track; int y; int h; };   // kind: 0 hero, 1 header, 2 row
+    struct FeedItem { int kind; int section; int track; int y; int h; };   // kind: 0 hero, 1 header, 2 row, 3 tile row (track = first tile)
     bool feedMode() const { return tab == Tab::Home; }
     void rebuildFeed();
     Hit hitFeed(const QPoint &vp) const;
@@ -67,6 +70,8 @@ private:
     QString emptyMessage() const;
 
     Core *core;
+    Hover *rowHv;     // row hover wash, 150 ms
+    OneShot *enter;   // page enter: fade + 8 px rise, 150 ms
     Tab tab = Tab::Results;
     Hit hover;
     QTimer spin;

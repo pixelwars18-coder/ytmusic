@@ -6,6 +6,7 @@
 using namespace UI;
 
 PlayerBar::PlayerBar(Core *c, QWidget *parent) : QWidget(parent), core(c) {
+    hv = new Hover(this);
     setMouseTracking(true);
     setFixedHeight(92);
     setFocusPolicy(Qt::NoFocus);
@@ -94,6 +95,8 @@ void PlayerBar::mouseMoveEvent(QMouseEvent *e) {
     }
     const Id h = hitTest(e->position());
     if (h != hover) {
+        hv->set(hover, false);
+        hv->set(h, true);
         hover = h;
         setCursor(h == None ? Qt::ArrowCursor : Qt::PointingHandCursor);
         update();
@@ -101,7 +104,7 @@ void PlayerBar::mouseMoveEvent(QMouseEvent *e) {
 }
 
 void PlayerBar::mouseReleaseEvent(QMouseEvent *) { dragging = None; update(); }
-void PlayerBar::leaveEvent(QEvent *) { hover = None; update(); }
+void PlayerBar::leaveEvent(QEvent *) { hv->set(hover, false); hover = None; update(); }
 
 void PlayerBar::wheelEvent(QWheelEvent *e) {
     const Layout l = layout();
@@ -133,15 +136,15 @@ void PlayerBar::paintEvent(QPaintEvent *) {
                QFontMetrics(fnt(12)).elidedText(t ? t->artist : QStringLiteral("—"), Qt::ElideRight, int(l.text.width())));
     if (t) {
         const bool liked = core->isLiked(t->vid);
-        drawIconButton(p, l.heart, QStringLiteral("heart"), hover == Heart, false, liked, liked);
+        drawIconButton(p, l.heart, QStringLiteral("heart"), hv->get(Heart), false, liked, liked);
     }
 
     // transport
-    drawIconButton(p, l.shuffle, QStringLiteral("shuffle"), hover == Shuffle, false, core->shuffle);
-    drawIconButton(p, l.prev, QStringLiteral("prev"), hover == Prev);
+    drawIconButton(p, l.shuffle, QStringLiteral("shuffle"), hv->get(Shuffle), false, core->shuffle);
+    drawIconButton(p, l.prev, QStringLiteral("prev"), hv->get(Prev));
     drawIconButton(p, l.play, (core->paused || core->idle) ? QStringLiteral("play") : QStringLiteral("pause"), false, true);
-    drawIconButton(p, l.next, QStringLiteral("next"), hover == Next);
-    drawIconButton(p, l.repeat, QStringLiteral("repeat"), hover == Repeat, false, core->repeat > 0, false,
+    drawIconButton(p, l.next, QStringLiteral("next"), hv->get(Next));
+    drawIconButton(p, l.repeat, QStringLiteral("repeat"), hv->get(Repeat), false, core->repeat > 0, false,
                    core->repeat == Core::RepeatOne ? QStringLiteral("1") : QString());
 
     // seek
@@ -163,7 +166,7 @@ void PlayerBar::paintEvent(QPaintEvent *) {
     slider(l.seek, core->duration > 0 ? core->position / core->duration : 0, c.primary, hover == SeekBar || dragging == SeekBar);
 
     // volume
-    drawIconButton(p, l.mute, (core->muted || core->volume == 0) ? QStringLiteral("mute") : QStringLiteral("volume"), hover == Mute);
+    drawIconButton(p, l.mute, (core->muted || core->volume == 0) ? QStringLiteral("mute") : QStringLiteral("volume"), hv->get(Mute));
     slider(l.volBar, core->muted ? 0 : core->volume / 100.0, c.tertiary, hover == VolBar || dragging == VolBar);
     p.setPen(c.onSurfaceVariant);
     p.setFont(fnt(11));

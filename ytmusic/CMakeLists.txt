@@ -20,6 +20,7 @@ add_executable(ytmusic
     src/ui_common.cpp
     src/tracklist.cpp
     src/lyrics.cpp
+    src/shell.cpp
     src/playerbar.cpp
     src/mainwindow.cpp
 )

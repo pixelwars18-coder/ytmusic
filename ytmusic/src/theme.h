@@ -4,25 +4,30 @@
 #include <QObject>
 #include <QTimer>
 
+// Default look: VoiceStudio's dark "Studio" theme (near-black canvas, #111 cards, hairline borders, blue accent).
 struct Palette {
-    QColor primary{"#fff59b"}, onPrimary{"#0e0e43"}, secondary{"#a9aefe"}, tertiary{"#9BFECE"};
-    QColor surface{"#070722"}, surfaceVariant{"#11112d"}, onSurface{"#f3edf7"};
-    QColor onSurfaceVariant{"#7c80b4"}, outline{"#21215F"}, error{"#fd4663"};
+    QColor primary{"#4f7df3"}, onPrimary{"#ffffff"}, secondary{"#8fb4ff"}, tertiary{"#72cebd"};
+    QColor surface{"#0a0a0a"}, surfaceVariant{"#111111"}, onSurface{"#f5f5f5"};
+    QColor onSurfaceVariant{"#8d8d93"}, outline{"#1f1f22"}, error{"#f0506e"};
 };
+inline QColor withAlpha(QColor c, int a) { c.setAlpha(a); return c; }
 
-// Live Noctalia palette, rendered by a Noctalia user template to
+// Optionally the live Noctalia palette, rendered by a Noctalia user template to
 // $XDG_STATE_HOME/ytmusic/theme.json. Falls back to Noctalia's stock colors.
 class Theme : public QObject {
     Q_OBJECT
 public:
     static Theme &I();
     const Palette &p() const { return pal; }
+    void setFollowNoctalia(bool on);   // off (default): the fixed Studio colours; on: the live Noctalia palette
+    bool followNoctalia() const { return follow; }
 signals:
     void changed();
 private:
     Theme();
     void reload();
     Palette pal;
+    bool follow = false;
     QFileSystemWatcher watcher;
     QTimer debounce;
     QString file;

@@ -13,13 +13,16 @@ QString fmtTime(double s) {
     return QStringLiteral("%1:%2").arg(m).arg(sec, 2, 10, QLatin1Char('0'));
 }
 
-void drawIconButton(QPainter &p, const QRectF &r, const QString &icon, bool hover, bool filled, bool toggled, bool fill,
+void drawIconButton(QPainter &p, const QRectF &r, const QString &icon, qreal hover, bool filled, bool toggled, bool fill,
                     const QString &badge) {
     const Palette &c = P();
     p.setPen(Qt::NoPen);
-    if (filled || hover) {
-        p.setBrush(filled ? c.primary : c.outline);
+    if (filled) {
+        p.setBrush(c.primary);
         p.drawEllipse(r);
+    } else if (hover > 0.001) {
+        p.setBrush(withAlpha(Qt::white, int(18 * hover)));
+        p.drawRoundedRect(r, 8, 8);
     }
     const QColor ic = filled ? c.onPrimary : (toggled ? c.primary : c.onSurface);
     const qreal s = r.width() * 0.45;
@@ -36,22 +39,18 @@ int pillWidth(const QString &label, const QString &icon) {
     return fm.horizontalAdvance(label) + 24 + (icon.isEmpty() ? 0 : 20);
 }
 
-void drawPill(QPainter &p, const QRectF &r, const QString &label, const QString &icon, bool accent, bool hover) {
+void drawPill(QPainter &p, const QRectF &r, const QString &label, const QString &icon, bool accent, qreal hover) {
     const Palette &c = P();
     p.setRenderHint(QPainter::Antialiasing);
-    if (accent) {
-        p.setPen(Qt::NoPen);
-        p.setBrush(c.secondary);
-    } else {
-        p.setPen(QPen(c.outline, 1));
-        p.setBrush(hover ? QBrush(c.outline) : QBrush(Qt::NoBrush));
-    }
-    p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), r.height() / 2, r.height() / 2);
-    const QColor fg = accent ? c.onPrimary : c.onSurface;
+    // VoiceStudio buttons: small rounded rectangles, hairline border; the selected one is a soft white wash
+    p.setPen(QPen(withAlpha(Qt::white, int((accent ? 26 : 20) + 14 * hover)), 1));
+    p.setBrush(accent ? withAlpha(Qt::white, int(24 + 10 * hover)) : withAlpha(Qt::white, int(16 * hover)));
+    p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), 8, 8);
+    const QColor fg = c.onSurface;
     p.setFont(fnt(12, QFont::Medium));
     QRectF tr = r;
     if (!icon.isEmpty()) {
-        Icons::paint(p, QRectF(r.left() + 12, r.center().y() - 7, 14, 14), icon, fg);
+        Icons::paint(p, QRectF(r.left() + 12, r.center().y() - 7, 14, 14), icon, accent ? c.primary : c.onSurfaceVariant);
         tr.setLeft(r.left() + 20);
     }
     p.setPen(fg);

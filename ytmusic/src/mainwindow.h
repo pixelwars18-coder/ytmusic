@@ -1,4 +1,5 @@
 #pragma once
+#include "anim.h"
 #include "core.h"
 #include "mpris.h"
 #include <QLineEdit>
@@ -9,6 +10,9 @@ class TrackList;
 class Toast;
 class PlayerBar;
 class LyricsView;
+class RailBar;
+class SidePanel;
+class TopBar;
 class QMenu;
 class QAction;
 
@@ -56,6 +60,8 @@ private:
     QVector<Item> items() const;
     Core *core;
     int hover = -1;
+    Hover *hv;
+    OneShot *enter;
 };
 
 class MainWindow : public QWidget {
@@ -94,6 +100,15 @@ private:
     Core *core;
     SearchBox *search;
     TabsBar *tabs;
+    RailBar *rail;
+    SidePanel *panel;
+    TopBar *topBar;
+    bool panelOpen = true;
+    qreal panelW = 260;
+    class QVariantAnimation *panelAnim = nullptr;
+    void animatePanel();
+    bool panelShown() const { return panelOpen && width() >= 860; }
+    void layoutAll();
     TrackList *tracks;
     LyricsView *lyricsView;
     PlayerBar *bar;

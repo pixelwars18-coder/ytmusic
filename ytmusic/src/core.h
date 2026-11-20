@@ -44,6 +44,7 @@ public:
     QString status, searchQuery;
     int searchLimit = 25, pageSize = 25;   // pageSize: results per search / "Load more"
     bool startHidden = false;              // start in the tray
+    bool followNoctalia = false;           // use the Noctalia palette instead of the Studio colours
     bool closeToTray = true;               // the window's close button hides it (false: quits)
     int audioQuality = 0;                  // 0 best, 1 balanced (<=128 kbps), 2 data saver (<=64 kbps)
     int memoryMode = 1;                    // when idle mpv is shut down: 0 soon, 1 normal, 2 never
@@ -145,6 +146,7 @@ public slots:
     void setPageSize(int n);
     void setStartHidden(bool on);
     void setCloseToTray(bool on);
+    void setFollowNoctalia(bool on);
     void setAudioQuality(int q);
     void setMemoryMode(int m);
     void shutdown();

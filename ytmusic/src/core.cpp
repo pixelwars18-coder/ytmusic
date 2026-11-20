@@ -86,6 +86,7 @@ void Core::load() {
     pageSize = qBound(10, o.value("pageSize").toInt(25), 100);
     startHidden = o.value("startHidden").toBool(false);
     closeToTray = o.value("closeToTray").toBool(true);
+    followNoctalia = o.value("followNoctalia").toBool(false);
     audioQuality = qBound(0, o.value("audioQuality").toInt(0), 2);
     memoryMode = qBound(0, o.value("memoryMode").toInt(1), 2);
     searchLimit = pageSize;
@@ -132,6 +133,7 @@ void Core::save() {
     o["pageSize"] = pageSize;
     o["startHidden"] = startHidden;
     o["closeToTray"] = closeToTray;
+    o["followNoctalia"] = followNoctalia;
     o["audioQuality"] = audioQuality;
     o["memoryMode"] = memoryMode;
     o["shuffle"] = shuffle;
@@ -1011,6 +1013,11 @@ QString Core::importBackup(const QString &path, bool *ok) {
 
 void Core::setPageSize(int n) {
     pageSize = qBound(10, n, 100);
+    scheduleSave();
+}
+
+void Core::setFollowNoctalia(bool on) {
+    followNoctalia = on;
     scheduleSave();
 }
 
